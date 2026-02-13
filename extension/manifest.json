@@ -1,0 +1,24 @@
+{
+    "manifest_version": 3,
+    "name": "Rightclicked",
+    "version": "1.0.0",
+    "description": "Save LinkedIn posts in one click",
+    "permissions": ["activeTab", "contextMenus", "storage", "scripting"],
+    "host_permissions": ["https://www.linkedin.com/*", "http://localhost:3001/*"],
+    "content_security_policy": {
+        "extension_pages": "script-src 'self' https://www.google.com https://www.gstatic.com; object-src 'self'"
+    },
+    "background": {
+        "service_worker": "background.js"
+    },
+    "content_scripts": [
+        {
+            "matches": ["https://www.linkedin.com/*"],
+            "js": ["content.js"],
+            "css": ["content.css"]
+        }
+    ],
+    "action": {
+        "default_popup": "popup.html"
+    }
+}
