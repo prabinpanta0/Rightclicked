@@ -87,32 +87,36 @@ router.post("/", saveLimiter, async (req, res) => {
         });
         await post.save();
 
-        // AI analysis runs in background — auto-assigns topic, tags, summary, sentiment
-        // Respects user's autoAnalyze setting and daily quota
-        (async () => {
-            try {
-                const user = await User.findById(req.userId);
-                if (user?.aiSettings?.autoAnalyze === false) return;
+        // AI analysis — runs BEFORE sending the response so it completes
+        // on serverless platforms (Vercel kills the process after res.send).
+        // If analysis fails, we still return the saved post without it.
+        try {
+            const user = await User.findById(req.userId);
+            const shouldAnalyze = user?.aiSettings?.autoAnalyze !== false;
+
+            if (shouldAnalyze) {
                 const quota = await checkAiQuota(req.userId);
-                if (!quota.allowed) return;
-
-                const analysis = await analyzePost(postText);
-                const update = { aiAnalyzed: true };
-                if (analysis.topic) update.topic = analysis.topic;
-                if (analysis.keywords?.length > 0) update.keywords = analysis.keywords;
-                if (analysis.summary) update.summary = analysis.summary;
-                if (analysis.sentiment) update.sentiment = analysis.sentiment;
-                if (analysis.tags?.length > 0) {
-                    const existingTags = new Set(post.tags || []);
-                    analysis.tags.forEach(t => existingTags.add(t));
-                    update.tags = [...existingTags];
+                if (quota.allowed) {
+                    const analysis = await analyzePost(postText);
+                    const update = { aiAnalyzed: true };
+                    if (analysis.topic) update.topic = analysis.topic;
+                    if (analysis.keywords?.length > 0) update.keywords = analysis.keywords;
+                    if (analysis.summary) update.summary = analysis.summary;
+                    if (analysis.sentiment) update.sentiment = analysis.sentiment;
+                    if (analysis.tags?.length > 0) {
+                        const existingTags = new Set(post.tags || []);
+                        analysis.tags.forEach(t => existingTags.add(t));
+                        update.tags = [...existingTags];
+                    }
+                    const updated = await Post.findByIdAndUpdate(post._id, update, { new: true });
+                    return res.status(201).json(updated);
                 }
-                await Post.findByIdAndUpdate(post._id, update);
-            } catch (err) {
-                console.error("Background AI analysis failed:", err.message);
             }
-        })();
+        } catch (err) {
+            console.error("AI analysis failed (post still saved):", err.message);
+        }
 
+        // Return the post without analysis if AI was skipped/failed
         res.status(201).json(post);
     } catch (err) {
         res.status(500).json({ error: "Failed to save post" });

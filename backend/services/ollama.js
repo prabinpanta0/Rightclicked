@@ -350,7 +350,7 @@ function validateAndClean(parsed) {
 
 // ── Main analysis function (with retry) ─────────────────────
 
-async function analyzePost(postText, retries = 2) {
+async function analyzePost(postText, retries = IS_CLOUD ? 1 : 2) {
     const trimmed = (postText || "").slice(0, 1500);
     if (trimmed.length < 20) return fallbackAnalysis(postText);
 
@@ -368,7 +368,7 @@ async function analyzePost(postText, retries = 2) {
                 method: "POST",
                 headers: buildHeaders(),
                 body: JSON.stringify(body),
-                signal: AbortSignal.timeout(IS_CLOUD ? 60000 : 30000),
+                signal: AbortSignal.timeout(IS_CLOUD ? 25000 : 30000),
             });
 
             // Cloud free tier: 429 = hourly token budget exhausted
@@ -398,7 +398,7 @@ async function analyzePost(postText, retries = 2) {
         } catch (err) {
             console.error(`AI analysis attempt ${attempt + 1}:`, err.message);
             if (attempt < retries) {
-                await new Promise(r => setTimeout(r, IS_CLOUD ? 1000 * (attempt + 1) : 200 * (attempt + 1)));
+                await new Promise(r => setTimeout(r, IS_CLOUD ? 500 * (attempt + 1) : 200 * (attempt + 1)));
             }
         }
     }

@@ -533,10 +533,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (!container) container = findMostVisiblePost();
         if (container) {
             const data = extractPostData(container);
-            sendResponse(data.postText ? { postData: data } : { error: "Could not extract post content" });
+            if (!data.postText) {
+                sendResponse({ error: "Could not extract post content" });
+                return true;
+            }
+            // If engagement is all zeros, LinkedIn may not have rendered the social
+            // bar yet. Retry once after a short delay to give it time to load.
+            const eng = data.engagement;
+            if (!eng.likes && !eng.comments && !eng.reposts) {
+                setTimeout(() => {
+                    data.engagement = extractEngagement(container);
+                    sendResponse({ postData: data });
+                }, 600);
+                return true; // keep message channel open for async response
+            }
+            sendResponse({ postData: data });
         } else {
             sendResponse({ error: "No LinkedIn post found" });
         }
+        return true;
     }
     if (message.action === "showNotification") {
         showToast(message.success, message.message);
