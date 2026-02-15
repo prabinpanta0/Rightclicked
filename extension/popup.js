@@ -147,7 +147,7 @@ async function loadRecentSaves() {
     try {
         const { token } = await chrome.storage.local.get("token");
         if (!token) return;
-        const res = await fetch("http://localhost:3001/api/posts?limit=5&sort=-dateSaved", {
+        const res = await fetch("https://rightclicked-backend.vercel.app/api/posts?limit=5&sort=-dateSaved", {
             headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) throw new Error("Failed to load");
@@ -196,7 +196,7 @@ function timeAgo(dateStr) {
 async function popupTrackEvent(event, meta) {
     const { token } = await chrome.storage.local.get("token");
     if (!token) return;
-    fetch("http://localhost:3001/api/analytics/event", {
+    fetch("https://rightclicked-backend.vercel.app/api/analytics/event", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ event, meta: meta || {} }),

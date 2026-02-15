@@ -627,7 +627,7 @@ function savePostFromUI(container) {
 function trackEvent(event, meta) {
     chrome.storage.local.get("token", ({ token }) => {
         if (!token) return;
-        fetch("http://localhost:3001/api/analytics/event", {
+        fetch("https://rightclicked-backend.vercel.app/api/analytics/event", {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
             body: JSON.stringify({ event, meta: meta || {} }),

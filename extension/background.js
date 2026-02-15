@@ -1,5 +1,5 @@
-const API_BASE = "http://localhost:3001/api";
-const FRONTEND_BASE = "http://localhost:5173";
+const API_BASE = "https://rightclicked-backend.vercel.app/api";
+const FRONTEND_BASE = "https://rightclicked.vercel.app";
 
 // ---------- Global rate limiter (shared across all tabs) ----------
 

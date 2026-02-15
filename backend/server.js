@@ -17,7 +17,7 @@ connectDB();
 app.use(helmet());
 
 // CORS — allow local dev, Vercel frontend, and browser extensions
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
 app.use(
     cors({
         origin: ["http://localhost:5173", FRONTEND_URL, /^chrome-extension:\/\//].filter(Boolean),
