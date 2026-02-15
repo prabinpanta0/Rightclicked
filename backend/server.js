@@ -16,9 +16,11 @@ connectDB();
 // Security headers
 app.use(helmet());
 
+// CORS — allow local dev, Vercel frontend, and browser extensions
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 app.use(
     cors({
-        origin: ["http://localhost:5173", /^chrome-extension:\/\//],
+        origin: ["http://localhost:5173", FRONTEND_URL, /^chrome-extension:\/\//].filter(Boolean),
         credentials: true,
     }),
 );
@@ -40,6 +42,11 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: "Internal server error" });
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+// Start server only when not imported by Vercel's serverless runtime
+if (process.env.VERCEL !== "1") {
+    app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+    });
+}
+
+module.exports = app;
