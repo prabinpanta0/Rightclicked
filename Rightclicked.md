@@ -102,3 +102,6 @@ Examples:
 * LinkedIn anti-scraping / rate limiting  
 * Topic detection quality (if automated)
 
+## todo
+avoid ban from scraping
+human readable text 

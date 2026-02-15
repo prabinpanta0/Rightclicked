@@ -1,76 +1,9 @@
-.rc-save-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 6px 14px;
-    margin: 6px 4px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #fff;
-    background: #0a66c2;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    z-index: 10;
-    position: relative;
-    max-width: 280px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.rc-save-btn:hover {
-    background: #004182;
-    color: #fff;
-}
-
-.rc-save-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-
-.rc-save-btn--saved {
-    background: #057642;
-    color: #fff;
-}
-
-.rc-save-btn--error {
-    background: #cc1016;
-    color: #fff;
-}
-
-.rc-toast {
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    z-index: 99999;
-    padding: 10px 16px;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    color: #fff;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    animation: rc-slide-in 0.25s ease;
-}
-
-.rc-toast--ok {
-    background: #057642;
-}
-
-.rc-toast--err {
-    background: #cc1016;
-}
-
-@keyframes rc-slide-in {
-    from {
-        transform: translateY(16px);
-        opacity: 0;
-    }
-    to {
-        transform: translateY(0);
-        opacity: 1;
-    }
-}
+/*
+ * Rightclicked — content styles
+ *
+ * All injected UI elements (toast, dropdown menu item) now use
+ * inline styles to avoid CSS-class fingerprinting by LinkedIn.
+ *
+ * This file is intentionally empty. Keeping it referenced in
+ * manifest.json avoids a "file not found" warning if removed.
+ */

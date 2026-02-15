@@ -51,10 +51,10 @@ export default function GroupFilters({ groupBy, onFilterChange }) {
             <div className="flex flex-wrap gap-1.5">
                 <button
                     onClick={clearAll}
-                    className={`px-3 py-1 text-[13px] rounded border transition-colors ${
+                    className={`px-3 py-1 text-[13px] rounded-lg border transition-colors ${
                         noneSelected
-                            ? "bg-blue-50 text-linkedin border-linkedin"
-                            : "bg-white text-muted border-border hover:border-gray-400"
+                            ? "bg-accent text-linkedin border-linkedin"
+                            : "bg-surface text-muted border-border hover:border-muted"
                     }`}
                 >
                     All
@@ -66,10 +66,10 @@ export default function GroupFilters({ groupBy, onFilterChange }) {
                         <button
                             key={id}
                             onClick={() => toggle(id)}
-                            className={`px-3 py-1 text-[13px] rounded border transition-colors ${
+                            className={`px-3 py-1 text-[13px] rounded-lg border transition-colors ${
                                 isActive
-                                    ? "bg-blue-50 text-linkedin border-linkedin"
-                                    : "bg-white text-muted border-border hover:border-gray-400"
+                                    ? "bg-accent text-linkedin border-linkedin"
+                                    : "bg-surface text-muted border-border hover:border-muted"
                             }`}
                         >
                             {formatFilterLabel(groupBy, group._id)}

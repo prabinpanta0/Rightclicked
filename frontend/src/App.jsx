@@ -1,7 +1,10 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import Analytics from "./pages/Analytics";
+import ConnectExtension from "./pages/ConnectExtension";
 import Dashboard from "./pages/Dashboard";
+import Download from "./pages/Download";
+import ExtensionConnected from "./pages/ExtensionConnected";
 import GroupedView from "./pages/GroupedView";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -25,6 +28,9 @@ export default function App() {
                 <Routes>
                     <Route path="/login" element={<Login />} />
                     <Route path="/register" element={<Register />} />
+                    <Route path="/download" element={<Download />} />
+                    <Route path="/connect-extension" element={<ConnectExtension />} />
+                    <Route path="/extension-connected" element={<ExtensionConnected />} />
                     <Route
                         path="/"
                         element={

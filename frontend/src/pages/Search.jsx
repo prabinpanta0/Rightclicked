@@ -37,19 +37,19 @@ export default function Search() {
     }
 
     return (
-        <div className="max-w-3xl mx-auto px-4 py-8">
+        <div className="max-w-2xl mx-auto px-4 py-8">
             <h1 className="text-xl font-semibold text-body mb-6">Search Posts</h1>
 
-            <form onSubmit={handleSearch} className="bg-white border border-border rounded-lg p-5 mb-6 space-y-3">
+            <form onSubmit={handleSearch} className="bg-surface border border-border rounded-xl p-5 mb-6 space-y-3">
                 {/* AI/Manual toggle */}
                 <div className="flex items-center gap-2 mb-1">
                     <button
                         type="button"
                         onClick={() => setUseAI(true)}
-                        className={`px-3 py-1 text-[13px] font-medium rounded border transition-colors ${
+                        className={`px-3 py-1 text-[13px] font-medium rounded-lg border transition-colors ${
                             useAI
-                                ? "bg-blue-50 text-linkedin border-linkedin"
-                                : "bg-white text-muted border-border hover:border-gray-400"
+                                ? "bg-accent text-linkedin border-linkedin"
+                                : "bg-surface text-muted border-border hover:border-muted"
                         }`}
                     >
                         AI Search
@@ -57,10 +57,10 @@ export default function Search() {
                     <button
                         type="button"
                         onClick={() => setUseAI(false)}
-                        className={`px-3 py-1 text-[13px] font-medium rounded border transition-colors ${
+                        className={`px-3 py-1 text-[13px] font-medium rounded-lg border transition-colors ${
                             !useAI
-                                ? "bg-blue-50 text-linkedin border-linkedin"
-                                : "bg-white text-muted border-border hover:border-gray-400"
+                                ? "bg-accent text-linkedin border-linkedin"
+                                : "bg-surface text-muted border-border hover:border-muted"
                         }`}
                     >
                         Manual Filters
@@ -72,8 +72,8 @@ export default function Search() {
                         type="text"
                         value={query}
                         onChange={e => setQuery(e.target.value)}
-                        placeholder={useAI ? "Describe what you're looking for..." : "Search post text..."}
-                        className="w-full px-4 py-2.5 border border-border rounded text-sm focus:outline-none focus:border-linkedin"
+                        placeholder={useAI ? "Describe what you're looking for…" : "Search post text…"}
+                        className="w-full px-4 py-2.5 bg-surface border border-border rounded-lg text-sm text-body focus:outline-none focus:border-linkedin"
                     />
                 </div>
 
@@ -92,26 +92,26 @@ export default function Search() {
                             value={author}
                             onChange={e => setAuthor(e.target.value)}
                             placeholder="Author name"
-                            className="px-3 py-2 border border-border rounded text-sm focus:outline-none focus:border-linkedin"
+                            className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-body focus:outline-none focus:border-linkedin"
                         />
                         <input
                             type="text"
                             value={topic}
                             onChange={e => setTopic(e.target.value)}
                             placeholder="Topic"
-                            className="px-3 py-2 border border-border rounded text-sm focus:outline-none focus:border-linkedin"
+                            className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-body focus:outline-none focus:border-linkedin"
                         />
                         <input
                             type="text"
                             value={tag}
                             onChange={e => setTag(e.target.value)}
                             placeholder="Tag"
-                            className="px-3 py-2 border border-border rounded text-sm focus:outline-none focus:border-linkedin"
+                            className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-body focus:outline-none focus:border-linkedin"
                         />
                         <select
                             value={sentiment}
                             onChange={e => setSentiment(e.target.value)}
-                            className="px-3 py-2 border border-border rounded text-sm focus:outline-none focus:border-linkedin bg-white"
+                            className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-body focus:outline-none focus:border-linkedin"
                         >
                             <option value="">Any sentiment</option>
                             <option value="educational">Educational</option>
@@ -128,7 +128,7 @@ export default function Search() {
 
                 <button
                     type="submit"
-                    className="w-full py-2.5 bg-linkedin text-white text-sm font-medium rounded hover:bg-linkedin-dark transition-colors"
+                    className="w-full py-2.5 bg-linkedin text-white text-sm font-medium rounded-lg hover:bg-linkedin-dark transition-colors"
                 >
                     {useAI ? "Search with AI" : "Search"}
                 </button>
@@ -136,24 +136,27 @@ export default function Search() {
 
             {loading && (
                 <div className="text-center py-12 text-muted text-sm">
-                    {useAI ? "AI is analyzing your query..." : "Searching..."}
+                    {useAI ? "AI is analyzing your query…" : "Searching…"}
                 </div>
             )}
 
             {/* Show AI-generated search terms */}
             {!loading && searched && useAI && (aiTerms.length > 0 || aiTopics.length > 0) && (
-                <div className="bg-gray-50 border border-border rounded-lg px-4 py-3 mb-4">
+                <div className="bg-surface-raised border border-border rounded-xl px-4 py-3 mb-4">
                     <p className="text-xs font-medium text-muted mb-1.5">AI expanded your search to include:</p>
                     <div className="flex flex-wrap gap-1.5">
                         {aiTopics.map(t => (
-                            <span key={t} className="px-2 py-0.5 text-xs font-medium bg-blue-50 text-linkedin rounded">
+                            <span
+                                key={t}
+                                className="px-2 py-0.5 text-xs font-medium bg-accent text-linkedin rounded-full"
+                            >
                                 {t}
                             </span>
                         ))}
                         {aiTerms.map(t => (
                             <span
                                 key={t}
-                                className="px-2 py-0.5 text-xs bg-white text-muted rounded border border-border"
+                                className="px-2 py-0.5 text-xs bg-surface text-muted rounded-full border border-border"
                             >
                                 {t}
                             </span>
@@ -169,7 +172,7 @@ export default function Search() {
             {!loading && posts.length > 0 && (
                 <div>
                     <p className="text-xs text-muted mb-4">{total} results</p>
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                         {posts.map(post => (
                             <PostCard key={post._id} post={post} />
                         ))}

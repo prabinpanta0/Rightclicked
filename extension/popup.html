@@ -48,47 +48,6 @@
                 border-left: 3px solid #b24020;
                 color: #b24020;
             }
-            .tabs {
-                display: flex;
-                margin-bottom: 8px;
-                border-bottom: 1px solid #e5e7eb;
-            }
-            .tab {
-                flex: 1;
-                padding: 7px 0;
-                font-size: 12px;
-                font-weight: 600;
-                text-align: center;
-                cursor: pointer;
-                border: none;
-                background: none;
-                color: #6b7280;
-                border-bottom: 2px solid transparent;
-                transition: all 0.15s;
-            }
-            .tab:hover {
-                color: #1d2226;
-            }
-            .tab.active {
-                color: #0a66c2;
-                border-bottom-color: #0a66c2;
-            }
-            .auth-form {
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
-            }
-            .auth-form input {
-                padding: 8px 10px;
-                border: 1px solid #e5e7eb;
-                border-radius: 4px;
-                font-size: 13px;
-                outline: none;
-                background: #fff;
-            }
-            .auth-form input:focus {
-                border-color: #0a66c2;
-            }
             .btn {
                 padding: 8px 14px;
                 background: #0a66c2;
@@ -113,6 +72,12 @@
             }
             .btn.failed {
                 background: #cc1016;
+            }
+            .auth-desc {
+                font-size: 12px;
+                color: #6b7280;
+                line-height: 1.5;
+                margin-bottom: 10px;
             }
             .error {
                 color: #cc1016;
@@ -198,7 +163,6 @@
             .links a:hover {
                 background: #f9fafb;
             }
-            /* Logged-in tabs */
             .main-tabs {
                 display: flex;
                 margin-bottom: 8px;
@@ -224,7 +188,6 @@
                 color: #0a66c2;
                 border-bottom-color: #0a66c2;
             }
-            /* Recent saves list */
             .recent-list {
                 max-height: 220px;
                 overflow-y: auto;
@@ -285,21 +248,8 @@
         <div class="content">
             <div id="auth-section">
                 <div class="status warn">Not logged in</div>
-                <div class="tabs">
-                    <button class="tab active" id="tab-login">Login</button>
-                    <button class="tab" id="tab-register">Register</button>
-                </div>
-                <form class="auth-form" id="login-form">
-                    <input type="email" id="login-email" placeholder="Email" required />
-                    <input type="password" id="login-password" placeholder="Password" required />
-                    <button type="submit" class="btn" id="login-btn">Log In</button>
-                </form>
-                <form class="auth-form" id="register-form" style="display: none">
-                    <input type="text" id="reg-name" placeholder="Name" required />
-                    <input type="email" id="reg-email" placeholder="Email" required />
-                    <input type="password" id="reg-password" placeholder="Password" required />
-                    <button type="submit" class="btn" id="register-btn">Create Account</button>
-                </form>
+                <p class="auth-desc">Log in through the Rightclicked web app to connect your extension.</p>
+                <button class="btn" id="login-via-frontend">Login via Rightclicked</button>
                 <div class="error" id="auth-error"></div>
             </div>
             <div id="logged-in-section">

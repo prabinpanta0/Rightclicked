@@ -1,90 +1,416 @@
-const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5:0.5b";
+// ── Ollama provider config ──────────────────────────────────
+// Supports both local Ollama and Ollama Cloud.
+//
+// Local (default):
+//   OLLAMA_BASE_URL=http://localhost:11434  (no API key needed)
+//
+// Ollama Cloud (free tier — ~250k tokens/hour, then paused):
+//   OLLAMA_BASE_URL=https://ollama.com   ← NO trailing /api!
+//   OLLAMA_API_KEY=your_ollama_api_key_here
+//   OLLAMA_MODEL=gemma3:4b  (small, fast, good at structured JSON)
+//
+// The code appends /api/generate, so:
+//   Local  → http://localhost:11434/api/generate
+//   Cloud  → https://ollama.com/api/generate
 
-// Advanced system prompt -- single call returns structured JSON with:
-//   topic, tags, summary, sentiment, keywords
+// let OLLAMA_BASE = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/+$/, "");
+let OLLAMA_BASE = process.env.OLLAMA_BASE_URL.replace(/\/+$/, "");
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:3b";
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "";
 
-const SYSTEM_PROMPT = `You are a LinkedIn post analysis engine for the "Rightclicked" app.
-Your job is to analyze a saved LinkedIn post and return structured metadata that helps users organize, search, and rediscover posts later.
+// True when pointing at Ollama Cloud (ollama.com) rather than a local instance
+const IS_CLOUD = OLLAMA_BASE.includes("ollama.com");
 
-You MUST respond with ONLY valid JSON. No markdown, no explanation, no extra text.
-
-The JSON schema you must follow:
-{
-  "topic": "<exactly ONE broad category>",
-  "tags": ["<3 to 6 specific lowercase tags>"],
-  "summary": "<one sentence TL;DR, max 30 words>",
-  "sentiment": "<exactly ONE of: educational, inspirational, controversial, promotional, hiring, opinion, news, personal_story>",
-  "keywords": ["<3 to 5 important lowercase terms from the post>"]
+// Auto-fix common misconfiguration: strip trailing /api if user set it
+// (the endpoint path /api/generate is appended by the code)
+if (OLLAMA_BASE.endsWith("/api")) {
+    console.warn("[AI] ⚠ Stripping trailing /api from OLLAMA_BASE_URL — the code appends /api/generate automatically.");
+    OLLAMA_BASE = OLLAMA_BASE.slice(0, -4);
 }
 
-Rules:
-- "topic" must be exactly ONE of: Technology, Business, Career, Leadership, Marketing, Finance, Entrepreneurship, Education, Health, AI & Machine Learning, Personal Development, Industry News, Sustainability, Design, Engineering, Science, Other
-- "tags" should be specific, lowercase, and useful for grouping similar posts (e.g. "remote-work", "fundraising", "open-source", "hiring", "layoffs", "product-launch")
-- "summary" is a single sentence capturing the core point of the post, written in third person (e.g. "The author argues that..." or "A breakdown of...")
-- "sentiment" classifies the tone/purpose of the post
-- "keywords" are the most important nouns/terms from the text itself (not categories)
-
-Example input: "Just raised our Series A! $12M to build the future of developer tools. Grateful to our investors and the amazing team that made this possible."
-Example output: {"topic":"Entrepreneurship","tags":["fundraising","series-a","developer-tools","startup"],"summary":"The author announces a $12M Series A raise for a developer tools startup.","sentiment":"promotional","keywords":["series a","developer tools","investors","fundraising"]}`;
-
-async function analyzePost(postText) {
-    try {
-        const trimmed = postText.slice(0, 1500);
-        const res = await fetch(`${OLLAMA_BASE}/api/generate`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                model: OLLAMA_MODEL,
-                system: SYSTEM_PROMPT,
-                prompt: `Analyze this LinkedIn post:\n\n"${trimmed}"`,
-                stream: false,
-                options: {
-                    temperature: 0.3,
-                    num_predict: 300,
-                },
-            }),
-            signal: AbortSignal.timeout(30000),
-        });
-        if (!res.ok) throw new Error(`Ollama returned ${res.status}`);
-        const data = await res.json();
-        const raw = (data.response || "").trim();
-
-        // Try to parse JSON from the response (may have markdown fences)
-        const jsonStr = raw
-            .replace(/^```json?\s*/i, "")
-            .replace(/```\s*$/, "")
-            .trim();
-        const parsed = JSON.parse(jsonStr);
-
-        return {
-            topic: typeof parsed.topic === "string" ? parsed.topic : "Other",
-            tags: Array.isArray(parsed.tags)
-                ? parsed.tags
-                      .map(t => String(t).toLowerCase().trim())
-                      .filter(Boolean)
-                      .slice(0, 8)
-                : [],
-            summary: typeof parsed.summary === "string" ? parsed.summary.slice(0, 200) : "",
-            sentiment: typeof parsed.sentiment === "string" ? parsed.sentiment.toLowerCase().trim() : "",
-            keywords: Array.isArray(parsed.keywords)
-                ? parsed.keywords
-                      .map(k => String(k).toLowerCase().trim())
-                      .filter(Boolean)
-                      .slice(0, 6)
-                : [],
-        };
-    } catch (err) {
-        console.error("AI analysis failed:", err.message);
-        // Return fallback so we still get partial data
-        return fallbackAnalysis(postText);
+// Build headers — add Bearer auth when an API key is present
+function buildHeaders() {
+    const headers = { "Content-Type": "application/json" };
+    if (OLLAMA_API_KEY) {
+        headers["Authorization"] = `Bearer ${OLLAMA_API_KEY}`;
     }
+    return headers;
 }
 
-// Fallback: keyword + topic detection without LLM (used when Ollama is down)
+// Build the request body — works for both local and cloud Ollama.
+// Ollama Cloud supports the same /api/generate spec as local Ollama,
+// including `format: "json"` and `options`. We include them everywhere.
+function buildRequestBody(base, extra = {}) {
+    const body = { ...base, model: OLLAMA_MODEL, stream: false };
+    body.format = "json";
+    if (extra.options) body.options = extra.options;
+    return body;
+}
+
+// Log provider once at startup
+console.log(
+    `[AI] Provider: ${IS_CLOUD ? "Ollama Cloud" : "Local Ollama"} | Model: ${OLLAMA_MODEL} | Base: ${OLLAMA_BASE}`,
+);
+
+// ── Post analysis prompt ────────────────────────────────────
+// Written for small local models (1B–8B). Keeps instructions
+// tight, gives a concrete example, and aggressively prevents
+// the model from adding conversational filler.
+
+const SYSTEM_PROMPT = `You extract structured data from LinkedIn posts into JSON.
+
+Return this exact shape:
+{"topic":"...","tags":["..."],"summary":"...","sentiment":"...","keywords":["..."]}
+
+Fields:
+
+1. "topic" — ONE from: Technology, Business, Career, Leadership, Marketing, Finance, Entrepreneurship, Education, Health, AI & Machine Learning, Personal Development, Industry News, Sustainability, Design, Engineering, Science.
+
+2. "tags" — 3-6 lowercase hyphenated labels (e.g. "remote-work", "series-a", "open-source").
+
+3. "summary" — One short sentence (~20 words), third person. Start with "The author …" or "A post about …".
+
+4. "sentiment" — ONE of: educational, inspirational, controversial, promotional, hiring, opinion, news, personal_story.
+
+5. "keywords" — 4-7 important nouns/phrases from the post (lowercase).
+
+Example:
+Input: "Just raised our Series A! $12M to build the future of developer tools. Grateful to our investors and the amazing team."
+Output: {"topic":"Entrepreneurship","tags":["fundraising","series-a","developer-tools","startup"],"summary":"The author announces a $12M Series A raise for a developer tools startup.","sentiment":"promotional","keywords":["series a","developer tools","investors","fundraising"]}`;
+
+// ── Robust JSON extraction ──────────────────────────────────
+// With format:"json" Ollama constrains output to valid JSON,
+// so we only need light cleanup for edge cases (fences, trailing junk).
+
+function extractJSON(raw) {
+    if (!raw || typeof raw !== "string") return null;
+
+    // Strategy 1: Direct parse (covers 99% of format:json responses)
+    try {
+        return JSON.parse(raw.trim());
+    } catch {}
+
+    // Strategy 2: Strip markdown code fences (rare with format:json)
+    const fenced = raw
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/```\s*$/, "")
+        .trim();
+    try {
+        return JSON.parse(fenced);
+    } catch {}
+
+    // Strategy 3: Extract first { … } block and trim trailing junk
+    const braceMatch = raw.match(/\{[\s\S]*\}/);
+    if (braceMatch) {
+        try {
+            return JSON.parse(braceMatch[0]);
+        } catch {}
+
+        let candidate = braceMatch[0];
+        const lastBrace = candidate.lastIndexOf("}");
+        if (lastBrace !== -1) {
+            candidate = candidate.slice(0, lastBrace + 1);
+            try {
+                return JSON.parse(candidate);
+            } catch {}
+        }
+    }
+
+    return null;
+}
+
+// ── Validation ──────────────────────────────────────────────
+
+const VALID_TOPICS = new Set([
+    "Technology",
+    "Business",
+    "Career",
+    "Leadership",
+    "Marketing",
+    "Finance",
+    "Entrepreneurship",
+    "Education",
+    "Health",
+    "AI & Machine Learning",
+    "Personal Development",
+    "Industry News",
+    "Sustainability",
+    "Design",
+    "Engineering",
+    "Science",
+    "Other",
+]);
+
+// Fuzzy topic matching — maps common AI model variations to the canonical topic name
+const TOPIC_ALIASES = new Map();
+for (const t of VALID_TOPICS) {
+    TOPIC_ALIASES.set(t.toLowerCase(), t);
+}
+// Common variations small models produce
+const EXTRA_ALIASES = {
+    tech: "Technology",
+    ai: "AI & Machine Learning",
+    ml: "AI & Machine Learning",
+    "machine learning": "AI & Machine Learning",
+    "artificial intelligence": "AI & Machine Learning",
+    "ai/ml": "AI & Machine Learning",
+    "ai and machine learning": "AI & Machine Learning",
+    "ai & ml": "AI & Machine Learning",
+    "deep learning": "AI & Machine Learning",
+    "self improvement": "Personal Development",
+    "self-improvement": "Personal Development",
+    "personal growth": "Personal Development",
+    growth: "Personal Development",
+    startup: "Entrepreneurship",
+    startups: "Entrepreneurship",
+    founder: "Entrepreneurship",
+    hiring: "Career",
+    jobs: "Career",
+    "job search": "Career",
+    interview: "Career",
+    news: "Industry News",
+    industry: "Industry News",
+    branding: "Marketing",
+    sales: "Marketing",
+    ux: "Design",
+    ui: "Design",
+    "ux design": "Design",
+    "product design": "Design",
+    healthcare: "Health",
+    wellness: "Health",
+    "mental health": "Health",
+    management: "Leadership",
+    investing: "Finance",
+    economics: "Finance",
+    green: "Sustainability",
+    climate: "Sustainability",
+    environment: "Sustainability",
+    cloud: "Technology",
+    "cloud computing": "Technology",
+    azure: "Technology",
+    aws: "Technology",
+    "google cloud": "Technology",
+    microsoft: "Technology",
+    devops: "Technology",
+    cybersecurity: "Technology",
+    programming: "Technology",
+    software: "Technology",
+    "software engineering": "Engineering",
+    "data science": "Technology",
+    blockchain: "Technology",
+    "web development": "Technology",
+    certification: "Education",
+    certifications: "Education",
+    learning: "Education",
+    training: "Education",
+    course: "Education",
+    "online learning": "Education",
+    "professional development": "Education",
+    achievement: "Personal Development",
+    motivation: "Personal Development",
+    networking: "Career",
+    resume: "Career",
+    "job market": "Career",
+    promotion: "Career",
+    layoff: "Career",
+    layoffs: "Career",
+    hr: "Business",
+    "human resources": "Business",
+    strategy: "Business",
+    innovation: "Business",
+    "product management": "Business",
+    "social media": "Marketing",
+    advertising: "Marketing",
+    "content marketing": "Marketing",
+    diversity: "Leadership",
+    "company culture": "Leadership",
+    "team building": "Leadership",
+    crypto: "Finance",
+    cryptocurrency: "Finance",
+    banking: "Finance",
+    "venture capital": "Finance",
+    energy: "Sustainability",
+    "clean energy": "Sustainability",
+    biotech: "Science",
+    research: "Science",
+    physics: "Science",
+    biology: "Science",
+};
+for (const [alias, canonical] of Object.entries(EXTRA_ALIASES)) {
+    TOPIC_ALIASES.set(alias.toLowerCase(), canonical);
+}
+
+function matchTopic(raw) {
+    if (!raw || typeof raw !== "string") return { topic: "Other", subTopic: "" };
+    // Exact match first
+    if (VALID_TOPICS.has(raw)) return { topic: raw, subTopic: "" };
+    // Case-insensitive match
+    const lower = raw.toLowerCase().trim();
+    if (TOPIC_ALIASES.has(lower)) return { topic: TOPIC_ALIASES.get(lower), subTopic: "" };
+    // Strip common wrapping characters the model might add
+    const cleaned = lower.replace(/[^a-z0-9 &/]/g, "").trim();
+    if (TOPIC_ALIASES.has(cleaned)) return { topic: TOPIC_ALIASES.get(cleaned), subTopic: "" };
+    // Fallback — preserve the hallucinated value so it isn't lost
+    return { topic: "Other", subTopic: raw.slice(0, 60).trim() };
+}
+
+const VALID_SENTIMENTS = new Set([
+    "educational",
+    "inspirational",
+    "controversial",
+    "promotional",
+    "hiring",
+    "opinion",
+    "news",
+    "personal_story",
+]);
+
+// Truncate a summary to at most maxWords, ending on a sentence boundary when possible.
+function truncateSummary(raw, maxWords = 40) {
+    if (!raw || typeof raw !== "string") return "";
+    const trimmed = raw.trim();
+    const words = trimmed.split(/\s+/);
+    if (words.length <= maxWords) return trimmed;
+
+    // Take first maxWords words, then look for the last sentence-ending punctuation
+    const slice = words.slice(0, maxWords).join(" ");
+    const sentenceEnd = Math.max(slice.lastIndexOf("."), slice.lastIndexOf("!"), slice.lastIndexOf("?"));
+    if (sentenceEnd > slice.length * 0.4) {
+        // Found a sentence boundary past the 40% mark — cut there
+        return slice.slice(0, sentenceEnd + 1);
+    }
+    // No good boundary — return the word-limited slice with ellipsis
+    return slice + "…";
+}
+
+function validateAndClean(parsed) {
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const { topic, subTopic } = matchTopic(parsed.topic);
+
+    let tags = Array.isArray(parsed.tags)
+        ? parsed.tags
+              .map(t =>
+                  String(t)
+                      .toLowerCase()
+                      .replace(/[^a-z0-9-]/g, "")
+                      .trim(),
+              )
+              .filter(t => t.length > 1)
+              .slice(0, 8)
+        : [];
+
+    // If the model hallucinated a topic, preserve it as a tag so the data isn't lost
+    if (subTopic) {
+        const asTag = subTopic
+            .toLowerCase()
+            .replace(/[^a-z0-9-]/g, "-")
+            .replace(/-+/g, "-")
+            .replace(/^-|-$/g, "");
+        if (asTag.length > 1 && !tags.includes(asTag)) {
+            tags = [asTag, ...tags].slice(0, 8);
+        }
+    }
+
+    const summary = truncateSummary(typeof parsed.summary === "string" ? parsed.summary : "");
+
+    const rawSentiment =
+        typeof parsed.sentiment === "string"
+            ? parsed.sentiment
+                  .toLowerCase()
+                  .replace(/[^a-z_]/g, "")
+                  .trim()
+            : "";
+    const sentiment = VALID_SENTIMENTS.has(rawSentiment) ? rawSentiment : "";
+
+    const keywords = Array.isArray(parsed.keywords)
+        ? parsed.keywords
+              .map(k => String(k).toLowerCase().trim())
+              .filter(k => k.length > 1)
+              .slice(0, 6)
+        : [];
+
+    // -- Sparse output recovery --
+    // If the model returned fewer than 3 tags, supplement from keywords
+    if (tags.length < 3 && keywords.length > 0) {
+        for (const kw of keywords) {
+            const asTag = kw
+                .replace(/[^a-z0-9-]/g, "-")
+                .replace(/-+/g, "-")
+                .replace(/^-|-$/g, "");
+            if (asTag.length > 1 && !tags.includes(asTag)) {
+                tags.push(asTag);
+                if (tags.length >= 4) break;
+            }
+        }
+    }
+
+    return { topic, tags, summary, sentiment, keywords };
+}
+
+// ── Main analysis function (with retry) ─────────────────────
+
+async function analyzePost(postText, retries = 2) {
+    const trimmed = (postText || "").slice(0, 1500);
+    if (trimmed.length < 20) return fallbackAnalysis(postText);
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            const body = buildRequestBody(
+                {
+                    system: SYSTEM_PROMPT,
+                    prompt: `Analyze this LinkedIn post and return ONLY the JSON object, nothing else:\n\n${trimmed}`,
+                },
+                { options: { temperature: 0.2, num_predict: 450, top_p: 0.9 } },
+            );
+
+            const res = await fetch(`${OLLAMA_BASE}/api/generate`, {
+                method: "POST",
+                headers: buildHeaders(),
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(IS_CLOUD ? 60000 : 30000),
+            });
+
+            // Cloud free tier: 429 = hourly token budget exhausted
+            if (res.status === 429) {
+                const retryAfter = res.headers.get("retry-after");
+                console.warn(`[AI] Cloud rate limit hit (429). Retry-After: ${retryAfter || "unknown"}s`);
+                // Don't retry — wait won't help within this request
+                return fallbackAnalysis(postText);
+            }
+
+            if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
+            const data = await res.json();
+            const raw = (data.response || "").trim();
+
+            const parsed = extractJSON(raw);
+            if (!parsed) {
+                console.warn(`AI parse attempt ${attempt + 1} failed. Raw: ${raw.slice(0, 120)}...`);
+                continue;
+            }
+
+            const result = validateAndClean(parsed);
+            if (result && (result.topic !== "Other" || result.tags.length > 0 || result.summary)) {
+                return result;
+            }
+
+            console.warn(`AI attempt ${attempt + 1} returned sparse data, retrying...`);
+        } catch (err) {
+            console.error(`AI analysis attempt ${attempt + 1}:`, err.message);
+            if (attempt < retries) {
+                await new Promise(r => setTimeout(r, IS_CLOUD ? 1000 * (attempt + 1) : 200 * (attempt + 1)));
+            }
+        }
+    }
+
+    console.warn("AI analysis: all attempts failed, using fallback");
+    return fallbackAnalysis(postText);
+}
+
+// ── Fallback: keyword + topic detection without LLM ─────────
 
 function fallbackAnalysis(postText) {
-    const text = postText.toLowerCase();
+    const text = (postText || "").toLowerCase();
     const stopWords = new Set([
         "the",
         "a",
@@ -225,7 +551,6 @@ function fallbackAnalysis(postText) {
         .slice(0, 5)
         .map(([w]) => w);
 
-    // Rule-based topic detection
     const topicRules = [
         {
             topic: "AI & Machine Learning",
@@ -336,9 +661,8 @@ function fallbackAnalysis(postText) {
             topic = rule.topic;
         }
     }
-    if (!topic && bestScore === 0) topic = "Other";
+    if (!topic) topic = "Other";
 
-    // Rule-based sentiment detection
     let sentiment = "";
     if (/\b(learn|lesson|tip|how to|guide|explained)\b/i.test(text)) sentiment = "educational";
     else if (/\b(inspir|motivat|grateful|proud|achievement)\b/i.test(text)) sentiment = "inspirational";
@@ -347,59 +671,51 @@ function fallbackAnalysis(postText) {
     else if (/\b(opinion|unpopular|hot take|disagree|debate)\b/i.test(text)) sentiment = "opinion";
     else if (/\b(breaking|report|according to|study shows)\b/i.test(text)) sentiment = "news";
 
-    return {
-        topic,
-        tags: keywords.slice(0, 3),
-        summary: "",
-        sentiment,
-        keywords,
-    };
+    return { topic, tags: keywords.slice(0, 3), summary: "", sentiment, keywords };
 }
 
-const SEARCH_PROMPT = `You are a search query expander for the "Rightclicked" app, which saves LinkedIn posts.
-The user wants to find saved posts by describing a topic in natural language.
-Your job is to generate an array of search terms that would match relevant posts.
+// ── Search term generation prompt ───────────────────────────
 
-You MUST respond with ONLY valid JSON. No markdown, no explanation, no extra text.
+const SEARCH_PROMPT = `You are a search-term expansion tool for a LinkedIn post bookmarking app. Given a user's search query, generate relevant search terms that would match saved posts.
 
-The JSON schema:
-{
-  "terms": ["<5 to 10 specific search terms or phrases>"],
-  "topics": ["<1 to 3 matching topic categories>"],
-  "sentiment": "<optional: one of educational, inspirational, controversial, promotional, hiring, opinion, news, personal_story, or empty string>"
-}
+Respond with ONLY a JSON object. No other text.
 
-Rules:
-- "terms" should include synonyms, related words, abbreviations, and specific phrases someone might use in a LinkedIn post about this topic
-- "topics" must be from: Technology, Business, Career, Leadership, Marketing, Finance, Entrepreneurship, Education, Health, AI & Machine Learning, Personal Development, Industry News, Sustainability, Design, Engineering, Science, Other
-- "sentiment" should be set only if the query clearly implies a specific tone, otherwise use ""
-- Think about what words would actually appear in LinkedIn posts about this topic
+{"terms":["..."],"topics":["..."],"sentiment":"..."}
 
-Example input: "startup fundraising tips"
-Example output: {"terms":["fundraising","startup","series a","seed round","investors","venture capital","vc","pitch deck","raise","funding"],"topics":["Entrepreneurship","Finance"],"sentiment":"educational"}`;
+- "terms": 5-10 specific words/phrases that might appear in LinkedIn posts about this topic (synonyms, abbreviations, related concepts)
+- "topics": 1-3 categories from this list: Technology, Business, Career, Leadership, Marketing, Finance, Entrepreneurship, Education, Health, AI & Machine Learning, Personal Development, Industry News, Sustainability, Design, Engineering, Science.
+- "sentiment": one of educational/inspirational/controversial/promotional/hiring/opinion/news/personal_story, or "" if unclear
+
+Example:
+Input: "startup fundraising tips"
+Output: {"terms":["fundraising","startup","series a","seed round","investors","venture capital","vc","pitch deck","raise","funding"],"topics":["Entrepreneurship","Finance"],"sentiment":"educational"}`;
 
 async function generateSearchTerms(query) {
     try {
+        const body = buildRequestBody(
+            {
+                system: SEARCH_PROMPT,
+                prompt: `Search query: "${query}"\n\nRespond with ONLY the JSON object, nothing else.`,
+            },
+            { options: { temperature: 0.3, num_predict: 200 } },
+        );
+
         const res = await fetch(`${OLLAMA_BASE}/api/generate`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                model: OLLAMA_MODEL,
-                system: SEARCH_PROMPT,
-                prompt: `Generate search terms for this query: "${query}"`,
-                stream: false,
-                options: { temperature: 0.3, num_predict: 200 },
-            }),
-            signal: AbortSignal.timeout(15000),
+            headers: buildHeaders(),
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(IS_CLOUD ? 30000 : 15000),
         });
+        if (res.status === 429) {
+            console.warn("[AI] Cloud rate limit hit (429) during search term generation");
+            throw new Error("Rate limit exceeded");
+        }
         if (!res.ok) throw new Error(`Ollama returned ${res.status}`);
         const data = await res.json();
         const raw = (data.response || "").trim();
-        const jsonStr = raw
-            .replace(/^```json?\s*/i, "")
-            .replace(/```\s*$/, "")
-            .trim();
-        const parsed = JSON.parse(jsonStr);
+        const parsed = extractJSON(raw);
+
+        if (!parsed) throw new Error("Could not parse search terms JSON");
 
         return {
             terms: Array.isArray(parsed.terms)
@@ -418,7 +734,6 @@ async function generateSearchTerms(query) {
         };
     } catch (err) {
         console.error("AI search term generation failed:", err.message);
-        // Fallback: split query into individual words as search terms
         const words = query
             .toLowerCase()
             .split(/\s+/)

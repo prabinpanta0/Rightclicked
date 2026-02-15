@@ -25,7 +25,7 @@ export default function Register() {
                 <h1 className="text-2xl font-bold text-center text-body mb-1">Rightclicked</h1>
                 <p className="text-center text-muted text-sm mb-6">Create your account</p>
 
-                <form onSubmit={handleSubmit} className="bg-white border border-border rounded-lg p-6 space-y-4">
+                <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-lg p-6 space-y-4">
                     {error && (
                         <div className="p-3 text-sm text-red-600 bg-red-50 rounded">
                             {error}
@@ -40,7 +40,7 @@ export default function Register() {
                         onChange={e => setName(e.target.value)}
                         placeholder="Full name"
                         required
-                        className="w-full px-4 py-2.5 border border-border rounded text-sm focus:outline-none focus:border-linkedin"
+                        className="w-full px-4 py-2.5 bg-surface border border-border rounded text-sm text-body focus:outline-none focus:border-linkedin"
                     />
                     <input
                         type="email"
@@ -48,7 +48,7 @@ export default function Register() {
                         onChange={e => setEmail(e.target.value)}
                         placeholder="Email"
                         required
-                        className="w-full px-4 py-2.5 border border-border rounded text-sm focus:outline-none focus:border-linkedin"
+                        className="w-full px-4 py-2.5 bg-surface border border-border rounded text-sm text-body focus:outline-none focus:border-linkedin"
                     />
                     <input
                         type="password"
@@ -57,7 +57,7 @@ export default function Register() {
                         placeholder="Password (min 8 characters)"
                         required
                         minLength={8}
-                        className="w-full px-4 py-2.5 border border-border rounded text-sm focus:outline-none focus:border-linkedin"
+                        className="w-full px-4 py-2.5 bg-surface border border-border rounded text-sm text-body focus:outline-none focus:border-linkedin"
                     />
                     <button
                         type="submit"

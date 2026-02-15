@@ -34,7 +34,7 @@ export default function Analytics() {
 
     if (loading) {
         return (
-            <div className="max-w-4xl mx-auto px-4 py-8">
+            <div className="max-w-2xl mx-auto px-4 py-8">
                 <div className="text-center py-12 text-muted text-sm">Loading analytics...</div>
             </div>
         );
@@ -42,7 +42,7 @@ export default function Analytics() {
 
     if (!data) {
         return (
-            <div className="max-w-4xl mx-auto px-4 py-8">
+            <div className="max-w-2xl mx-auto px-4 py-8">
                 <div className="text-center py-12 text-muted">Could not load analytics</div>
             </div>
         );
@@ -54,7 +54,7 @@ export default function Analytics() {
     const memberSince = data.memberSince ? new Date(data.memberSince).toLocaleDateString() : "—";
 
     return (
-        <div className="max-w-4xl mx-auto px-4 py-8">
+        <div className="max-w-2xl mx-auto px-4 py-8">
             <h1 className="text-xl font-semibold text-body mb-6">Analytics</h1>
 
             {/* Key metrics */}
@@ -75,7 +75,7 @@ export default function Analytics() {
 
             {/* Batch analyze */}
             {data.unanalyzedPosts > 0 && (
-                <div className="mb-8 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between">
+                <div className="mb-8 p-4 bg-accent border border-border rounded-xl flex items-center justify-between">
                     <div>
                         <p className="text-sm text-body font-medium">{data.unanalyzedPosts} posts need AI analysis</p>
                         <p className="text-xs text-muted mt-0.5">
@@ -106,8 +106,10 @@ export default function Analytics() {
                                     className="flex-1 bg-linkedin/20 hover:bg-linkedin/40 rounded-t transition-colors relative group"
                                     style={{ height: `${Math.max(h, 2)}%` }}
                                 >
-                                    <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center text-[10px] bg-white border border-border rounded px-2 py-1 whitespace-nowrap shadow-sm z-10">
-                                        <span className="text-body font-medium">{d.count} {d.count === 1 ? "post" : "posts"}</span>
+                                    <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center text-[10px] bg-surface border border-border rounded-lg px-2 py-1 whitespace-nowrap shadow-sm z-10">
+                                        <span className="text-body font-medium">
+                                            {d.count} {d.count === 1 ? "post" : "posts"}
+                                        </span>
                                         <span className="text-muted">{d._id}</span>
                                     </div>
                                 </div>
@@ -153,7 +155,7 @@ export default function Analytics() {
 
 function Stat({ label, value }) {
     return (
-        <div className="bg-white border border-border rounded-lg p-3">
+        <div className="bg-surface border border-border rounded-xl p-3">
             <p className="text-xs text-muted mb-1">{label}</p>
             <p className="text-lg font-semibold text-body">{value}</p>
         </div>

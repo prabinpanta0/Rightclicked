@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "../store/useAuthStore";
 
 export default function Login() {
@@ -7,12 +7,19 @@ export default function Login() {
     const [password, setPassword] = useState("");
     const { login, loading, error, clearError } = useAuthStore();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const isExtension = searchParams.get("ext") === "1";
 
     async function handleSubmit(e) {
         e.preventDefault();
         try {
             await login(email, password);
-            navigate("/");
+            if (isExtension) {
+                // After login, go to the connect page which handles the token handoff
+                navigate("/connect-extension", { replace: true });
+            } else {
+                navigate("/");
+            }
         } catch {
             // error is set in store
         }
@@ -22,9 +29,11 @@ export default function Login() {
         <div className="min-h-screen flex items-center justify-center px-4 bg-page">
             <div className="w-full max-w-sm">
                 <h1 className="text-2xl font-bold text-center text-body mb-1">Rightclicked</h1>
-                <p className="text-center text-muted text-sm mb-6">Log in to your account</p>
+                <p className="text-center text-muted text-sm mb-6">
+                    {isExtension ? "Log in to connect your extension" : "Log in to your account"}
+                </p>
 
-                <form onSubmit={handleSubmit} className="bg-white border border-border rounded-lg p-6 space-y-4">
+                <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-lg p-6 space-y-4">
                     {error && (
                         <div className="p-3 text-sm text-red-600 bg-red-50 rounded">
                             {error}
@@ -39,7 +48,7 @@ export default function Login() {
                         onChange={e => setEmail(e.target.value)}
                         placeholder="Email"
                         required
-                        className="w-full px-4 py-2.5 border border-border rounded text-sm focus:outline-none focus:border-linkedin"
+                        className="w-full px-4 py-2.5 bg-surface border border-border rounded text-sm text-body focus:outline-none focus:border-linkedin"
                     />
                     <input
                         type="password"
@@ -47,7 +56,7 @@ export default function Login() {
                         onChange={e => setPassword(e.target.value)}
                         placeholder="Password"
                         required
-                        className="w-full px-4 py-2.5 border border-border rounded text-sm focus:outline-none focus:border-linkedin"
+                        className="w-full px-4 py-2.5 bg-surface border border-border rounded text-sm text-body focus:outline-none focus:border-linkedin"
                     />
                     <button
                         type="submit"

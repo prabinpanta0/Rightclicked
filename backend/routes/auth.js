@@ -81,4 +81,69 @@ router.post("/login", verifyRecaptcha, async (req, res) => {
     }
 });
 
+// ── User settings endpoints ──────────────────────────────────
+const authMiddleware = require("../middleware/auth");
+
+// GET /api/auth/settings — return current user profile + AI settings
+router.get("/settings", authMiddleware, async (req, res) => {
+    try {
+        const user = await User.findById(req.userId);
+        if (!user) return res.status(404).json({ error: "User not found" });
+
+        // Reset daily count if it's a new day
+        const now = new Date();
+        const lastReset = user.aiUsage?.lastReset ? new Date(user.aiUsage.lastReset) : new Date(0);
+        if (now.toDateString() !== lastReset.toDateString()) {
+            user.aiUsage = { dailyCount: 0, lastReset: now };
+            await user.save();
+        }
+
+        res.json({
+            name: user.name,
+            email: user.email,
+            aiSettings: user.aiSettings || { dailyLimit: 25, autoAnalyze: true },
+            aiUsage: {
+                used: user.aiUsage?.dailyCount || 0,
+                limit: user.aiSettings?.dailyLimit ?? 25,
+                remaining: Math.max(0, (user.aiSettings?.dailyLimit ?? 25) - (user.aiUsage?.dailyCount || 0)),
+            },
+        });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to get settings" });
+    }
+});
+
+// PATCH /api/auth/settings — update AI settings
+router.patch("/settings", authMiddleware, async (req, res) => {
+    try {
+        const { dailyLimit, autoAnalyze } = req.body;
+        const update = {};
+
+        if (typeof dailyLimit === "number" && dailyLimit >= 0 && dailyLimit <= 100) {
+            update["aiSettings.dailyLimit"] = dailyLimit;
+        }
+        if (typeof autoAnalyze === "boolean") {
+            update["aiSettings.autoAnalyze"] = autoAnalyze;
+        }
+
+        if (Object.keys(update).length === 0) {
+            return res.status(400).json({ error: "No valid settings to update" });
+        }
+
+        const user = await User.findByIdAndUpdate(req.userId, { $set: update }, { new: true });
+        if (!user) return res.status(404).json({ error: "User not found" });
+
+        res.json({
+            aiSettings: user.aiSettings,
+            aiUsage: {
+                used: user.aiUsage?.dailyCount || 0,
+                limit: user.aiSettings?.dailyLimit ?? 25,
+                remaining: Math.max(0, (user.aiSettings?.dailyLimit ?? 25) - (user.aiUsage?.dailyCount || 0)),
+            },
+        });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to update settings" });
+    }
+});
+
 module.exports = router;

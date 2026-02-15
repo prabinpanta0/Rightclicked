@@ -22,6 +22,8 @@ export const usePostStore = create((set, get) => ({
     error: null,
     aiTerms: [],
     aiTopics: [],
+    /** Incremented on every data change — consumers can react to this */
+    _rev: 0,
 
     fetchPosts: async (page = 1) => {
         set({ loading: true, error: null });
@@ -33,10 +35,47 @@ export const usePostStore = create((set, get) => ({
                 page: data.page,
                 totalPages: data.totalPages,
                 loading: false,
+                _rev: get()._rev + 1,
             });
         } catch (err) {
             set({ error: "Failed to load posts", loading: false });
         }
+    },
+
+    /** Re-fetch the current page silently (no loading spinner). */
+    silentRefresh: async () => {
+        try {
+            const currentPage = get().page || 1;
+            const { data } = await apiGetPosts(currentPage);
+            // Only update if something actually changed
+            const prev = get();
+            const changed =
+                data.total !== prev.total ||
+                data.posts.length !== prev.posts.length ||
+                JSON.stringify(data.posts.map(p => p._id + (p.summary || "") + (p.sentiment || ""))) !==
+                    JSON.stringify(prev.posts.map(p => p._id + (p.summary || "") + (p.sentiment || "")));
+            if (changed) {
+                set({
+                    posts: data.posts,
+                    total: data.total,
+                    page: data.page,
+                    totalPages: data.totalPages,
+                    _rev: prev._rev + 1,
+                });
+            }
+        } catch (_) {
+            // Silent — don't show errors for background refreshes
+        }
+    },
+
+    /** Re-fetch grouped data silently. */
+    silentRefreshGrouped: async () => {
+        const groupBy = get().groupBy;
+        if (!groupBy) return;
+        try {
+            const { data } = await apiGetGroupedPosts(groupBy);
+            set({ groups: data.groups, _rev: get()._rev + 1 });
+        } catch (_) {}
     },
 
     searchPosts: async params => {
@@ -88,7 +127,13 @@ export const usePostStore = create((set, get) => ({
     removePost: async id => {
         try {
             await apiDeletePost(id);
-            set({ posts: get().posts.filter(p => p._id !== id) });
+            const newPosts = get().posts.filter(p => p._id !== id);
+            const newTotal = Math.max(0, get().total - 1);
+            set({
+                posts: newPosts,
+                total: newTotal,
+                totalPages: Math.max(1, Math.ceil(newTotal / 20)),
+            });
         } catch (err) {
             set({ error: "Failed to delete post" });
         }
@@ -111,8 +156,11 @@ export const usePostStore = create((set, get) => ({
             set({
                 posts: get().posts.map(p => (p._id === id ? data : p)),
             });
+            return data;
         } catch (err) {
-            set({ error: "Analysis failed" });
+            const errMsg = err.response?.data?.error || "Analysis failed";
+            set({ error: errMsg });
+            return null;
         }
     },
 

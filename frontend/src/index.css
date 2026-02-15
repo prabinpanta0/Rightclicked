@@ -1,20 +1,45 @@
 @import "tailwindcss";
 
+/* ── Design tokens ───────────────────────────────────────── */
 @theme {
     --color-linkedin: #0a66c2;
     --color-linkedin-dark: #004182;
     --color-body: #1d2226;
-    --color-page: #f9fafb;
+    --color-page: #f4f5f6;
     --color-muted: #6b7280;
-    --color-border: #e5e7eb;
+    --color-border: #e2e4e8;
+    --color-surface: #ffffff;
+    --color-surface-hover: #f9fafb;
+    --color-surface-raised: #f0f2f5;
+    --color-accent: #eef3f8;
+    --color-sentiment-positive: #057642;
+    --color-sentiment-negative: #cc1016;
+    --color-sentiment-neutral: #6b7280;
 }
 
+/* ── Dark mode overrides ────────────────────────────────── */
+:root.dark {
+    --color-body: #e8eaed;
+    --color-page: #111214;
+    --color-muted: #9ca3af;
+    --color-border: #2d3034;
+    --color-surface: #1b1f23;
+    --color-surface-hover: #22262b;
+    --color-surface-raised: #22262b;
+    --color-accent: #1e2a38;
+    color-scheme: dark;
+}
+
+/* ── Base ────────────────────────────────────────────────── */
 body {
     background-color: var(--color-page);
     color: var(--color-body);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    transition:
+        background-color 0.2s ease,
+        color 0.2s ease;
 }
 
 ::selection {
@@ -23,6 +48,48 @@ body {
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
     outline: none;
+}
+
+/* ── Scrollbar theming ──────────────────────────────────── */
+:root.dark ::-webkit-scrollbar {
+    width: 8px;
+}
+:root.dark ::-webkit-scrollbar-track {
+    background: var(--color-page);
+}
+:root.dark ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 4px;
+}
+
+/* ── Modal animations ───────────────────────────────────── */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+@keyframes zoomIn95 {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+.animate-in {
+    animation: fadeIn 0.15s ease-out;
+}
+.fade-in {
+    animation: fadeIn 0.15s ease-out;
+}
+.zoom-in-95 {
+    animation: zoomIn95 0.2s ease-out;
 }

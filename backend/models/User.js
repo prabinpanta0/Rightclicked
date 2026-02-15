@@ -24,6 +24,16 @@ const userSchema = new mongoose.Schema(
             type: Date,
             default: null,
         },
+        // AI usage tracking
+        aiUsage: {
+            dailyCount: { type: Number, default: 0 },
+            lastReset: { type: Date, default: Date.now },
+        },
+        // User-configurable AI settings
+        aiSettings: {
+            dailyLimit: { type: Number, default: 15, min: 0, max: 50 },
+            autoAnalyze: { type: Boolean, default: true },
+        },
     },
     {
         timestamps: true,

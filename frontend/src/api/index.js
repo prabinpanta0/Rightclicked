@@ -53,4 +53,9 @@ export const trackEvent = (event, meta) => api.post("/analytics/event", { event,
 
 export const getAnalyticsDashboard = () => api.get("/analytics/dashboard");
 
+// Settings
+export const getSettings = () => api.get("/auth/settings");
+
+export const updateSettings = settings => api.patch("/auth/settings", settings);
+
 export default api;

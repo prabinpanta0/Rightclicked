@@ -1,13 +1,42 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const Post = require("../models/Post");
+const User = require("../models/User");
 const auth = require("../middleware/auth");
-const { saveLimiter } = require("../middleware/rateLimit");
+const { saveLimiter, aiLimiter } = require("../middleware/rateLimit");
 const { analyzePost, generateSearchTerms } = require("../services/ollama");
 
 const router = express.Router();
 
 router.use(auth);
+
+// ── AI quota helper ──────────────────────────────────────────────
+// Checks and increments the user's daily AI usage. Returns { allowed, remaining, limit }.
+async function checkAiQuota(userId) {
+    const user = await User.findById(userId);
+    if (!user) return { allowed: false, remaining: 0, limit: 0 };
+
+    const now = new Date();
+    const lastReset = user.aiUsage?.lastReset ? new Date(user.aiUsage.lastReset) : new Date(0);
+
+    // Reset counter if it's a new day (UTC)
+    if (now.toDateString() !== lastReset.toDateString()) {
+        user.aiUsage = { dailyCount: 0, lastReset: now };
+    }
+
+    const limit = user.aiSettings?.dailyLimit ?? 25;
+    const count = user.aiUsage?.dailyCount ?? 0;
+
+    if (count >= limit) {
+        return { allowed: false, remaining: 0, limit };
+    }
+
+    user.aiUsage.dailyCount = count + 1;
+    user.aiUsage.lastReset = user.aiUsage.lastReset || now;
+    await user.save();
+
+    return { allowed: true, remaining: limit - count - 1, limit };
+}
 
 // Save a new post
 router.post("/", saveLimiter, async (req, res) => {
@@ -58,25 +87,31 @@ router.post("/", saveLimiter, async (req, res) => {
         });
         await post.save();
 
-        // AI analysis runs in background -- auto-assigns topic, tags, summary, sentiment
-        analyzePost(postText)
-            .then(async analysis => {
+        // AI analysis runs in background — auto-assigns topic, tags, summary, sentiment
+        // Respects user's autoAnalyze setting and daily quota
+        (async () => {
+            try {
+                const user = await User.findById(req.userId);
+                if (user?.aiSettings?.autoAnalyze === false) return;
+                const quota = await checkAiQuota(req.userId);
+                if (!quota.allowed) return;
+
+                const analysis = await analyzePost(postText);
                 const update = { aiAnalyzed: true };
                 if (analysis.topic) update.topic = analysis.topic;
                 if (analysis.keywords?.length > 0) update.keywords = analysis.keywords;
                 if (analysis.summary) update.summary = analysis.summary;
                 if (analysis.sentiment) update.sentiment = analysis.sentiment;
-                // Merge AI tags with any user-provided tags (no duplicates)
                 if (analysis.tags?.length > 0) {
                     const existingTags = new Set(post.tags || []);
                     analysis.tags.forEach(t => existingTags.add(t));
                     update.tags = [...existingTags];
                 }
                 await Post.findByIdAndUpdate(post._id, update);
-            })
-            .catch(err => {
+            } catch (err) {
                 console.error("Background AI analysis failed:", err.message);
-            });
+            }
+        })();
 
         res.status(201).json(post);
     } catch (err) {
@@ -217,7 +252,10 @@ router.get("/search/ai", async (req, res) => {
         };
 
         // Also search individual words from the original query (min 3 chars)
-        const queryWords = q.toLowerCase().split(/\s+/).filter(w => w.length >= 3);
+        const queryWords = q
+            .toLowerCase()
+            .split(/\s+/)
+            .filter(w => w.length >= 3);
         for (const word of queryWords) {
             const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
             directFilter.$or.push(
@@ -302,7 +340,14 @@ router.get("/search/ai", async (req, res) => {
                 Post.find(filter).sort({ dateSaved: -1 }).skip(skip).limit(parseInt(limit)),
                 Post.countDocuments(filter),
             ]);
-            return res.json({ posts, total, page: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)), aiTerms: [q], aiTopics: [] });
+            return res.json({
+                posts,
+                total,
+                page: parseInt(page),
+                totalPages: Math.ceil(total / parseInt(limit)),
+                aiTerms: [q],
+                aiTopics: [],
+            });
         } catch {
             res.status(500).json({ error: "AI search failed" });
         }
@@ -459,9 +504,18 @@ router.delete("/:id", async (req, res) => {
     }
 });
 
-// Re-analyze a post with Ollama
-router.post("/:id/analyze", async (req, res) => {
+// Re-analyze a post with Ollama (rate-limited)
+router.post("/:id/analyze", aiLimiter, async (req, res) => {
     try {
+        const quota = await checkAiQuota(req.userId);
+        if (!quota.allowed) {
+            return res.status(429).json({
+                error: `Daily AI limit reached (${quota.limit}/day). Adjust in Settings or try tomorrow.`,
+                remaining: 0,
+                limit: quota.limit,
+            });
+        }
+
         const post = await Post.findOne({ _id: req.params.id, userId: req.userId });
         if (!post) return res.status(404).json({ error: "Post not found" });
 
@@ -478,14 +532,14 @@ router.post("/:id/analyze", async (req, res) => {
         post.aiAnalyzed = true;
         await post.save();
 
-        res.json(post);
+        res.json({ ...post.toObject(), aiRemaining: quota.remaining });
     } catch (err) {
         res.status(500).json({ error: "Analysis failed" });
     }
 });
 
-// Batch analyze unanalyzed posts
-router.post("/analyze-batch", async (req, res) => {
+// Batch analyze unanalyzed posts (rate-limited)
+router.post("/analyze-batch", aiLimiter, async (req, res) => {
     try {
         const posts = await Post.find({ userId: req.userId, aiAnalyzed: false }).limit(10);
         if (posts.length === 0) {
@@ -494,6 +548,16 @@ router.post("/analyze-batch", async (req, res) => {
 
         let analyzed = 0;
         for (const post of posts) {
+            // Check quota for each analysis
+            const quota = await checkAiQuota(req.userId);
+            if (!quota.allowed) {
+                return res.json({
+                    analyzed,
+                    total: posts.length,
+                    message: `Stopped at ${analyzed}/${posts.length} — daily AI limit reached (${quota.limit}/day).`,
+                });
+            }
+
             try {
                 const analysis = await analyzePost(post.postText);
                 post.topic = analysis.topic || post.topic;

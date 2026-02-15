@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import GroupFilters from "../components/GroupFilters";
 import PostCard from "../components/PostCard";
+import useAutoRefresh from "../hooks/useAutoRefresh";
 import { usePostStore } from "../store/usePostStore";
 
 function formatGroupLabel(groupBy) {
@@ -16,16 +17,41 @@ function formatGroupId(groupBy, id) {
     return id;
 }
 
+const RefreshIcon = ({ spinning }) => (
+    <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+        className={`w-3.5 h-3.5 transition-transform duration-500 ${spinning ? "animate-spin" : ""}`}
+    >
+        <path
+            fillRule="evenodd"
+            d="M15.312 11.424a5.5 5.5 0 01-9.379 2.671l1.49-1.49A.75.75 0 006.893 11H2.75a.75.75 0 00-.75.75v4.143a.75.75 0 001.28.53l1.072-1.071a7.002 7.002 0 0011.735-3.222.75.75 0 00-.775-.706zm-10.624-2.85a5.5 5.5 0 019.376-2.67l-1.49 1.49a.75.75 0 00.53 1.53h4.143a.75.75 0 00.75-.75V2.75a.75.75 0 00-1.281-.53l-1.07 1.07A7.002 7.002 0 004.91 6.573a.75.75 0 00.776.706z"
+            clipRule="evenodd"
+        />
+    </svg>
+);
+
 export default function GroupedView() {
     const { groupBy } = useParams();
-    const { groups, loading, fetchGrouped } = usePostStore();
+    const { groups, loading, fetchGrouped, silentRefreshGrouped } = usePostStore();
     const [activeFilters, setActiveFilters] = useState(new Set());
+    const [refreshing, setRefreshing] = useState(false);
 
     useEffect(() => {
         if (groupBy) {
             fetchGrouped(groupBy);
         }
     }, [groupBy, fetchGrouped]);
+
+    // Auto-refresh grouped data
+    useAutoRefresh(silentRefreshGrouped, { interval: 15000 });
+
+    async function handleManualRefresh() {
+        setRefreshing(true);
+        await silentRefreshGrouped();
+        setTimeout(() => setRefreshing(false), 600);
+    }
 
     const handleFilterChange = useCallback(filterSet => {
         setActiveFilters(filterSet);
@@ -36,8 +62,17 @@ export default function GroupedView() {
         activeFilters.size === 0 ? groups : groups.filter(g => activeFilters.has(g._id || "uncategorized"));
 
     return (
-        <div className="max-w-3xl mx-auto px-4 py-8">
-            <h1 className="text-xl font-semibold text-body mb-4">Posts by {formatGroupLabel(groupBy)}</h1>
+        <div className="max-w-2xl mx-auto px-4 py-8">
+            <div className="flex items-center justify-between mb-4">
+                <h1 className="text-xl font-semibold text-body">Posts by {formatGroupLabel(groupBy)}</h1>
+                <button
+                    onClick={handleManualRefresh}
+                    title="Refresh"
+                    className="p-1.5 rounded-md text-muted hover:text-linkedin hover:bg-accent transition-colors"
+                >
+                    <RefreshIcon spinning={refreshing} />
+                </button>
+            </div>
             <GroupFilters groupBy={groupBy} onFilterChange={handleFilterChange} />
 
             {loading && <div className="text-center py-12 text-muted text-sm">Loading...</div>}
@@ -66,7 +101,9 @@ export default function GroupedView() {
                             <h2 className="text-sm font-semibold text-body capitalize">
                                 {formatGroupId(groupBy, group._id)}
                             </h2>
-                            <span className="px-1.5 py-0.5 text-xs bg-gray-100 text-muted rounded">{group.count}</span>
+                            <span className="px-1.5 py-0.5 text-xs bg-surface-raised text-muted rounded">
+                                {group.count}
+                            </span>
                         </div>
                         <div className="space-y-3 pl-4 border-l-2 border-gray-200">
                             {group.posts.map(post => (
