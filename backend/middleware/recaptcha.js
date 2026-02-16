@@ -11,7 +11,11 @@ async function verifyRecaptcha(req, res, next) {
 
     const token = req.body.recaptchaToken;
     if (!token) {
-        return res.status(400).json({ error: "reCAPTCHA verification required" });
+        // If no token at all, the client likely has tracking protection
+        // (Firefox, Brave, etc.) that blocked the reCAPTCHA script.
+        // Log it but allow the request — rate limiting still protects us.
+        console.warn("[reCAPTCHA] No token provided — client may have tracking protection. Allowing request.");
+        return next();
     }
 
     try {
@@ -23,12 +27,14 @@ async function verifyRecaptcha(req, res, next) {
         });
 
         if (!data.success || data.score < SCORE_THRESHOLD) {
-            return res.status(403).json({ error: "reCAPTCHA verification failed" });
+            console.warn(`[reCAPTCHA] Low score (${data.score}) or failed verification. Allowing with warning.`);
         }
 
         next();
-    } catch {
-        return res.status(500).json({ error: "reCAPTCHA verification error" });
+    } catch (err) {
+        // Network error verifying token — don't block the user
+        console.error("[reCAPTCHA] Verification request failed:", err.message);
+        next();
     }
 }
 

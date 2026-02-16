@@ -3,7 +3,7 @@ import { useAuthStore } from "../store/useAuthStore";
 
 const GITHUB_REPO = "https://github.com/prabinpanta0/Rightclicked";
 const GITHUB_RELEASES = `${GITHUB_REPO}/releases`;
-const GITHUB_EXT_ZIP = `${GITHUB_REPO}/archive/refs/heads/main.zip`;
+const GITHUB_EXT_ZIP = `${GITHUB_REPO}/archive/refs/heads/Rightclicked.zip`;
 
 const steps = [
     {

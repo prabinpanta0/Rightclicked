@@ -13,8 +13,22 @@ const PORT = process.env.PORT || 3001;
 
 connectDB();
 
-// Security headers
-app.use(helmet());
+// Security headers — relaxed CSP for Google Fonts, reCAPTCHA, etc.
+app.use(
+    helmet({
+        contentSecurityPolicy: {
+            directives: {
+                defaultSrc: ["'self'"],
+                scriptSrc: ["'self'", "https://www.google.com", "https://www.gstatic.com"],
+                styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+                fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+                imgSrc: ["'self'", "data:", "https://www.gstatic.com"],
+                connectSrc: ["'self'", "https://www.google.com"],
+                frameSrc: ["https://www.google.com", "https://www.gstatic.com"],
+            },
+        },
+    }),
+);
 
 // Trust proxy — required for express-rate-limit behind Vercel/reverse proxies
 app.set("trust proxy", 1);
