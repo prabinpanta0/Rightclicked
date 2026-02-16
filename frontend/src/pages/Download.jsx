@@ -3,7 +3,7 @@ import { useAuthStore } from "../store/useAuthStore";
 
 const GITHUB_REPO = "https://github.com/prabinpanta0/Rightclicked";
 const GITHUB_RELEASES = `${GITHUB_REPO}/releases`;
-const GITHUB_EXT_ZIP = `${GITHUB_REPO}/archive/refs/heads/Rightclicked.zip`;
+const GITHUB_EXT_ZIP = "https://github.com/prabinpanta0/Rightclicked/releases/download/extension/Rightclicked.zip";
 
 const steps = [
     {
@@ -60,7 +60,6 @@ const steps = [
         ),
     },
 ];
-
 
 export default function Download() {
     const token = useAuthStore(s => s.token);
@@ -124,7 +123,6 @@ export default function Download() {
                         ))}
                     </div>
                 </div>
-
 
                 {/* Already have it? */}
                 <div className="text-center text-sm text-muted">
