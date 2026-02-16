@@ -15,7 +15,7 @@
 
 // let OLLAMA_BASE = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/+$/, "");
 let OLLAMA_BASE = process.env.OLLAMA_BASE_URL.replace(/\/+$/, "");
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5:0.5b";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "ministral-3:3b";
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "";
 
 // True when pointing at Ollama Cloud (ollama.com) rather than a local instance
