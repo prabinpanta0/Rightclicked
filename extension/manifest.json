@@ -4,7 +4,11 @@
     "version": "1.0.0",
     "description": "Save LinkedIn posts in one click",
     "permissions": ["activeTab", "contextMenus", "storage"],
-    "host_permissions": ["https://www.linkedin.com/*", "https://rightclicked-backend.vercel.app/*", "https://rightclicked.vercel.app/*"],
+    "host_permissions": [
+        "https://www.linkedin.com/*",
+        "https://rightclicked-backend.vercel.app/*",
+        "https://rightclicked.vercel.app/*"
+    ],
     "author": "prabinpanta0",
     "background": {
         "service_worker": "background.js"

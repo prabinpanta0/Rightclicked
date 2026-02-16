@@ -41,15 +41,15 @@ npm run dev
 
 Required env vars:
 
-| Variable | Description |
-|---|---|
-| MONGODB_URI | MongoDB connection string |
-| JWT_SECRET | Secret for signing JWT tokens |
-| OLLAMA_BASE_URL | Ollama API base URL (https://ollama.com for cloud) |
-| OLLAMA_MODEL | Model name (e.g. ministral-3:3b) |
-| OLLAMA_API_KEY | API key for Ollama Cloud (omit for local Ollama) |
-| RECAPTCHA_SECRET | Google reCAPTCHA v3 secret key |
-| FRONTEND_URL | Frontend origin for CORS (e.g. http://localhost:5173) |
+| Variable         | Description                                           |
+| ---------------- | ----------------------------------------------------- |
+| MONGODB_URI      | MongoDB connection string                             |
+| JWT_SECRET       | Secret for signing JWT tokens                         |
+| OLLAMA_BASE_URL  | Ollama API base URL (https://ollama.com for cloud)    |
+| OLLAMA_MODEL     | Model name (e.g. ministral-3:3b)                      |
+| OLLAMA_API_KEY   | API key for Ollama Cloud (omit for local Ollama)      |
+| RECAPTCHA_SECRET | Google reCAPTCHA v3 secret key                        |
+| FRONTEND_URL     | Frontend origin for CORS (e.g. http://localhost:5173) |
 
 ### Frontend
 
@@ -62,10 +62,10 @@ npm run dev
 
 Required env vars:
 
-| Variable | Description |
-|---|---|
-| VITE_API_URL | Backend API URL (e.g. http://localhost:3001/api) |
-| VITE_RECAPTCHA_SITE_KEY | Google reCAPTCHA v3 site key |
+| Variable                | Description                                      |
+| ----------------------- | ------------------------------------------------ |
+| VITE_API_URL            | Backend API URL (e.g. http://localhost:3001/api) |
+| VITE_RECAPTCHA_SITE_KEY | Google reCAPTCHA v3 site key                     |
 
 ### Extension
 

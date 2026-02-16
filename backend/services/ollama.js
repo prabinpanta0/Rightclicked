@@ -15,7 +15,7 @@
 
 // let OLLAMA_BASE = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/+$/, "");
 let OLLAMA_BASE = process.env.OLLAMA_BASE_URL.replace(/\/+$/, "");
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:3b";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gemma3:1b";
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "";
 
 // True when pointing at Ollama Cloud (ollama.com) rather than a local instance
@@ -350,7 +350,7 @@ function validateAndClean(parsed) {
 
 // ── Main analysis function (with retry) ─────────────────────
 
-async function analyzePost(postText, retries = IS_CLOUD ? 1 : 2) {
+async function analyzePost(postText, retries = IS_CLOUD ? 0 : 2) {
     const trimmed = (postText || "").slice(0, 1500);
     if (trimmed.length < 20) return fallbackAnalysis(postText);
 
@@ -368,7 +368,7 @@ async function analyzePost(postText, retries = IS_CLOUD ? 1 : 2) {
                 method: "POST",
                 headers: buildHeaders(),
                 body: JSON.stringify(body),
-                signal: AbortSignal.timeout(IS_CLOUD ? 25000 : 30000),
+                signal: AbortSignal.timeout(IS_CLOUD ? 8000 : 30000),
             });
 
             // Cloud free tier: 429 = hourly token budget exhausted
@@ -704,7 +704,7 @@ async function generateSearchTerms(query) {
             method: "POST",
             headers: buildHeaders(),
             body: JSON.stringify(body),
-            signal: AbortSignal.timeout(IS_CLOUD ? 30000 : 15000),
+            signal: AbortSignal.timeout(IS_CLOUD ? 8000 : 15000),
         });
         if (res.status === 429) {
             console.warn("[AI] Cloud rate limit hit (429) during search term generation");
