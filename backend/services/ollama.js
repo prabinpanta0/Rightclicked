@@ -15,7 +15,7 @@
 
 // let OLLAMA_BASE = (process.env.OLLAMA_BASE_URL || "http://localhost:11434").replace(/\/+$/, "");
 let OLLAMA_BASE = process.env.OLLAMA_BASE_URL.replace(/\/+$/, "");
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gemma3:1b";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5:0.5b";
 const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "";
 
 // True when pointing at Ollama Cloud (ollama.com) rather than a local instance
@@ -361,7 +361,7 @@ async function analyzePost(postText, retries = IS_CLOUD ? 0 : 2) {
                     system: SYSTEM_PROMPT,
                     prompt: `Analyze this LinkedIn post and return ONLY the JSON object, nothing else:\n\n${trimmed}`,
                 },
-                { options: { temperature: 0.2, num_predict: 450, top_p: 0.9 } },
+                { options: { temperature: 0.2, num_predict: 300, top_p: 0.9 } },
             );
 
             const res = await fetch(`${OLLAMA_BASE}/api/generate`, {

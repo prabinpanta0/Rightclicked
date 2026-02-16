@@ -16,6 +16,9 @@ connectDB();
 // Security headers
 app.use(helmet());
 
+// Trust proxy — required for express-rate-limit behind Vercel/reverse proxies
+app.set("trust proxy", 1);
+
 // CORS — allow local dev, Vercel frontend, and browser extensions
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
 app.use(

@@ -105,7 +105,9 @@ export default function PostCard({ post }) {
 
     const formatted = formatPostText(post.postText);
     const { cleaned: cleanedText, hashtags: extractedHashtags } = extractHashtags(formatted);
-    const allKeywords = [...new Set([...(post.keywords || []), ...extractedHashtags])];
+    const allKeywords = [...new Set([...(post.keywords || []), ...extractedHashtags])].filter(
+        kw => !tags.some(t => t.toLowerCase() === kw.toLowerCase().replace(/^#/, "")),
+    );
     const textPreview = cleanedText?.length > 280 && !expanded ? cleanedText.slice(0, 280) + "…" : cleanedText;
 
     const likesStr = humanNumber(post.engagement?.likes);
