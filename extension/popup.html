@@ -48,6 +48,12 @@
                 border-left: 3px solid #b24020;
                 color: #b24020;
             }
+            .account-hint {
+                margin-top: 4px;
+                font-size: 11px;
+                color: #6b7280;
+                word-break: break-word;
+            }
             .btn {
                 padding: 8px 14px;
                 background: #0a66c2;
@@ -215,6 +221,7 @@
                 margin-top: 1px;
                 display: -webkit-box;
                 -webkit-line-clamp: 1;
+                line-clamp: 1;
                 -webkit-box-orient: vertical;
                 overflow: hidden;
             }
@@ -254,6 +261,7 @@
             </div>
             <div id="logged-in-section">
                 <div class="status ok" id="status-text">Ready to save</div>
+                <div class="account-hint" id="connected-account">Connected account: checking...</div>
                 <div class="main-tabs">
                     <button class="main-tab active" id="main-tab-save">Save Post</button>
                     <button class="main-tab" id="main-tab-recent">Recent</button>

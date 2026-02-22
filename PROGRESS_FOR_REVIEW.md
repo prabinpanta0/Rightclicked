@@ -358,7 +358,6 @@ All endpoints except auth require JWT auth. Posts save has rate limiting (saveLi
 - **Settings**: User settings (placeholder).
 - **State Management**: Zustand stores for auth (token, user) and posts (fetch, group, search actions).
 
-## Prepared talking points / likely questions
 
 - Q: "How are topics produced?"
     - A: "We use an LLM in the backend to classify the saved post text into 1–3 topic labels (auto) and surface them for user confirmation; we also run clustering on embeddings to find emergent topics and refine labels."

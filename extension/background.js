@@ -1,5 +1,12 @@
 const API_BASE = "https://rightclicked-backend.vercel.app/api";
 const FRONTEND_BASE = "https://rightclicked.vercel.app";
+const ACCOUNT_CACHE_TTL_MS = 5 * 60 * 1000;
+
+const AccountCache = {
+    token: null,
+    label: null,
+    expiresAt: 0,
+};
 
 // ---------- Global rate limiter (shared across all tabs) ----------
 
@@ -46,13 +53,16 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
     GlobalRateLimit.record();
 
-    chrome.tabs.sendMessage(tab.id, { action: "extractPost" }, async resp => {
+    chrome.tabs.sendMessage(tab.id, { action: "extractPost", source: "context-menu" }, async resp => {
         if (chrome.runtime.lastError || !resp?.postData) {
             notifyTab(tab.id, false, "Could not find post content here.");
             return;
         }
         const result = await savePost(resp.postData);
-        notifyTab(tab.id, result.success, result.success ? `Saved post by ${resp.postData.authorName}` : result.error);
+        const successMessage = result.accountLabel
+            ? `Saved post by ${resp.postData.authorName} to ${result.accountLabel}`
+            : `Saved post by ${resp.postData.authorName}`;
+        notifyTab(tab.id, result.success, result.success ? successMessage : result.error);
     });
 });
 
@@ -125,9 +135,33 @@ async function savePost(postData) {
             return { success: false, error: "Too many requests — please wait" };
         }
         if (!res.ok) throw new Error(data.error || "Save failed");
-        return { success: true, post: data };
+        const accountLabel = await getAccountLabel(token);
+        return { success: true, post: data, accountLabel };
     } catch (err) {
         return { success: false, error: err.message };
+    }
+}
+
+async function getAccountLabel(token) {
+    try {
+        const now = Date.now();
+        if (AccountCache.token === token && AccountCache.label && now < AccountCache.expiresAt) {
+            return AccountCache.label;
+        }
+        const res = await fetch(`${API_BASE}/auth/settings`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        const label = data.email || data.name || null;
+        if (label) {
+            AccountCache.token = token;
+            AccountCache.label = label;
+            AccountCache.expiresAt = now + ACCOUNT_CACHE_TTL_MS;
+        }
+        return label;
+    } catch {
+        return null;
     }
 }
 

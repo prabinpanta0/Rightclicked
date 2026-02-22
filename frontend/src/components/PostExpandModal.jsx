@@ -40,8 +40,17 @@ function formatPostText(raw) {
     let text = raw;
     text = text.replace(/…\s*see more/gi, "").replace(/\.\.\.\s*more/gi, "");
     text = text.replace(/^[-–—•]\s*/gm, "• ");
+    text = text.replace(/\r\n?/g, "\n");
     text = text.replace(/\n{3,}/g, "\n\n");
     return text.trim();
+}
+
+function getParagraphs(text) {
+    if (!text) return [];
+    return text
+        .split(/\n{2,}/)
+        .map(p => p.trim())
+        .filter(Boolean);
 }
 
 function extractHashtags(text) {
@@ -107,6 +116,7 @@ export default function PostExpandModal({ post, onClose }) {
 
     const formatted = formatPostText(post.postText);
     const { cleaned: cleanedText, hashtags: extractedHashtags } = extractHashtags(formatted);
+    const paragraphs = getParagraphs(cleanedText);
     const allKeywords = [...new Set([...(post.keywords || []), ...extractedHashtags])];
 
     const likesStr = humanNumber(post.engagement?.likes);
@@ -115,7 +125,7 @@ export default function PostExpandModal({ post, onClose }) {
     const hasEngagement = likesStr || commentsStr || repostsStr;
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6" onClick={onClose}>
+        <div className="fixed inset-0 z-100 flex items-center justify-center p-4 sm:p-6" onClick={onClose}>
             {/* Backdrop */}
             <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
 
@@ -184,7 +194,16 @@ export default function PostExpandModal({ post, onClose }) {
 
                 {/* Full post text */}
                 <div className="px-6 py-5">
-                    <p className="text-sm text-body/90 leading-[1.8] whitespace-pre-line">{cleanedText}</p>
+                    <div className="text-sm text-body/90 leading-[1.8]">
+                        {paragraphs.map((para, idx) => (
+                            <p
+                                key={`${post._id || "post"}-modal-p-${idx}`}
+                                className="whitespace-pre-line mb-4 last:mb-0"
+                            >
+                                {para}
+                            </p>
+                        ))}
+                    </div>
                 </div>
 
                 {/* Keywords & Hashtags */}

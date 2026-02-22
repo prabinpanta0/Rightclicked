@@ -263,7 +263,17 @@ function getCleanText(el) {
         .forEach(n => n.remove());
     // Strip visually-hidden / screen-reader-only duplicates
     clone.querySelectorAll('.visually-hidden, [class*="visually-hidden"]').forEach(n => n.remove());
-    return clone.textContent.trim();
+
+    // innerText preserves line breaks for <br> and block boundaries,
+    // which keeps paragraphs readable in the app.
+    const raw = (clone.innerText || clone.textContent || "").replace(/\u00a0/g, " ").trim();
+    if (!raw) return "";
+
+    return raw
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n[ \t]+/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
 }
 
 function findAuthorInSection(section) {
@@ -527,10 +537,27 @@ document.addEventListener("contextmenu", e => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.action === "extractPost") {
-        // Use right-click target when available (context menu flow),
-        // otherwise find the most visible post on screen (popup flow).
-        let container = lastRightClickedElement ? findPostContainer(lastRightClickedElement) : null;
-        if (!container) container = findMostVisiblePost();
+        // Source-aware extraction:
+        // - context-menu: prefer the exact right-clicked element
+        // - popup: always use currently visible post
+        // - fallback: best effort
+        const source = message.source || "unknown";
+
+        let container = null;
+        if (source === "context-menu") {
+            if (lastRightClickedElement && document.contains(lastRightClickedElement)) {
+                container = findPostContainer(lastRightClickedElement);
+            }
+            if (!container) container = findMostVisiblePost();
+        } else if (source === "popup") {
+            container = findMostVisiblePost();
+        } else {
+            if (lastRightClickedElement && document.contains(lastRightClickedElement)) {
+                container = findPostContainer(lastRightClickedElement);
+            }
+            if (!container) container = findMostVisiblePost();
+        }
+
         if (container) {
             const data = extractPostData(container);
             if (!data.postText) {
@@ -623,7 +650,8 @@ function savePostFromUI(container) {
         }
         if (response.success) {
             trackEvent("save_success", { timeMs });
-            showToast(true, `Saved post by ${authorShort}`);
+            const suffix = response.accountLabel ? ` to ${response.accountLabel}` : "";
+            showToast(true, `Saved post by ${authorShort}${suffix}`);
         } else if (response.error?.includes("already")) {
             showToast(true, "Post already saved");
         } else {
@@ -887,11 +915,11 @@ function _injectSaveOption(content, trigger, dropdown) {
             (trigger || document).dispatchEvent(escEvent);
         } catch (_) {}
 
-        // Use the same extraction path as the popup button and context menu:
-        // find the most visible post on screen and extract its data.
+        // Resolve the container from the menu trigger first so we save the
+        // exact post whose menu the user opened, not another visible post.
         // We delay slightly to let the dropdown close and clear the DOM.
         setTimeout(() => {
-            const container = findMostVisiblePost();
+            const container = findPostContainer(trigger) || findPostContainer(content) || findMostVisiblePost();
             if (!container) {
                 showToast(false, "No LinkedIn post found");
                 return;

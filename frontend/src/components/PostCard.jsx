@@ -21,8 +21,17 @@ function formatPostText(raw) {
     let text = raw;
     text = text.replace(/…\s*see more/gi, "").replace(/\.\.\.\s*more/gi, "");
     text = text.replace(/^[-–—•]\s*/gm, "• ");
+    text = text.replace(/\r\n?/g, "\n");
     text = text.replace(/\n{3,}/g, "\n\n");
     return text.trim();
+}
+
+function getParagraphs(text) {
+    if (!text) return [];
+    return text
+        .split(/\n{2,}/)
+        .map(p => p.trim())
+        .filter(Boolean);
 }
 
 /** Extract hashtags from text and return { cleaned, hashtags } */
@@ -105,6 +114,7 @@ export default function PostCard({ post }) {
 
     const formatted = formatPostText(post.postText);
     const { cleaned: cleanedText, hashtags: extractedHashtags } = extractHashtags(formatted);
+    const paragraphs = getParagraphs(cleanedText);
     const allKeywords = [...new Set([...(post.keywords || []), ...extractedHashtags])].filter(
         kw => !tags.some(t => t.toLowerCase() === kw.toLowerCase().replace(/^#/, "")),
     );
@@ -214,17 +224,31 @@ export default function PostCard({ post }) {
 
             {/* ── Post Body ── */}
             <div className="px-5 pb-3">
-                <p
-                    className="text-sm text-body/85 leading-[1.7] whitespace-pre-line cursor-pointer max-w-prose"
-                    onClick={() => setExpanded(!expanded)}
-                >
-                    {textPreview}
-                    {cleanedText?.length > 280 && (
-                        <span className="text-linkedin font-medium ml-1 text-xs hover:underline">
-                            {expanded ? "show less" : "read more"}
-                        </span>
-                    )}
-                </p>
+                {expanded ? (
+                    <div
+                        className="text-sm text-body/85 leading-[1.7] cursor-pointer max-w-prose"
+                        onClick={() => setExpanded(false)}
+                    >
+                        {paragraphs.map((para, idx) => (
+                            <p key={`${post._id || "post"}-p-${idx}`} className="whitespace-pre-line mb-3 last:mb-0">
+                                {para}
+                            </p>
+                        ))}
+                        {cleanedText?.length > 280 && (
+                            <span className="text-linkedin font-medium text-xs hover:underline">show less</span>
+                        )}
+                    </div>
+                ) : (
+                    <p
+                        className="text-sm text-body/85 leading-[1.7] whitespace-pre-line cursor-pointer max-w-prose"
+                        onClick={() => setExpanded(true)}
+                    >
+                        {textPreview}
+                        {cleanedText?.length > 280 && (
+                            <span className="text-linkedin font-medium ml-1 text-xs hover:underline">read more</span>
+                        )}
+                    </p>
+                )}
             </div>
 
             {/* ── Hashtags & Keywords (pills) ── */}

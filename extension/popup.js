@@ -12,6 +12,7 @@ const previewText = document.getElementById("preview-text");
 const saveFromPopup = document.getElementById("save-from-popup");
 const saveResult = document.getElementById("save-result");
 const logoutLink = document.getElementById("logout-link");
+const connectedAccount = document.getElementById("connected-account");
 const mainTabSave = document.getElementById("main-tab-save");
 const mainTabRecent = document.getElementById("main-tab-recent");
 const saveTabContent = document.getElementById("save-tab-content");
@@ -27,10 +28,33 @@ async function checkAuth() {
     if (token) {
         authSection.style.display = "none";
         loggedInSection.style.display = "block";
+        loadConnectedAccount();
         extractCurrentPost();
     } else {
         authSection.style.display = "block";
         loggedInSection.style.display = "none";
+        if (connectedAccount) connectedAccount.textContent = "";
+    }
+}
+
+async function loadConnectedAccount() {
+    if (!connectedAccount) return;
+    connectedAccount.textContent = "Connected account: checking...";
+    try {
+        const { token } = await chrome.storage.local.get("token");
+        if (!token) {
+            connectedAccount.textContent = "Connected account: not logged in";
+            return;
+        }
+        const res = await fetch("https://rightclicked-backend.vercel.app/api/auth/settings", {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error("Failed to fetch account");
+        const data = await res.json();
+        const display = data.email || data.name || "Unknown";
+        connectedAccount.textContent = `Connected account: ${display}`;
+    } catch {
+        connectedAccount.textContent = "Connected account: unavailable";
     }
 }
 
@@ -65,7 +89,7 @@ async function extractCurrentPost() {
         }
 
         // Ask the content script to extract the post (single source of truth)
-        chrome.tabs.sendMessage(tab.id, { action: "extractPost" }, resp => {
+        chrome.tabs.sendMessage(tab.id, { action: "extractPost", source: "popup" }, resp => {
             if (chrome.runtime.lastError || !resp?.postData) {
                 showPreviewEmpty("No post found. Use Save buttons in the LinkedIn feed.");
                 return;
@@ -109,7 +133,8 @@ saveFromPopup.addEventListener("click", async () => {
         popupTrackEvent("save_success", { timeMs });
         saveFromPopup.textContent = "Saved!";
         saveFromPopup.classList.add("saved");
-        saveResult.textContent = `Post by ${extractedPostData.authorName} saved successfully`;
+        const suffix = result.accountLabel ? ` to ${result.accountLabel}` : "";
+        saveResult.textContent = `Post by ${extractedPostData.authorName} saved successfully${suffix}`;
         saveResult.className = "save-result ok";
     } else {
         popupTrackEvent("save_failure", { timeMs, reason: result.error });
