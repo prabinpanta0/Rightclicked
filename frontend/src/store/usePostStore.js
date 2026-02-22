@@ -4,6 +4,7 @@ import {
     analyzePost as apiAnalyzePost,
     batchAnalyze as apiBatchAnalyze,
     deletePost as apiDeletePost,
+    formatPost as apiFormatPost,
     getGroupedPosts as apiGetGroupedPosts,
     getPosts as apiGetPosts,
     searchPosts as apiSearchPosts,
@@ -159,6 +160,20 @@ export const usePostStore = create((set, get) => ({
             return data;
         } catch (err) {
             const errMsg = err.response?.data?.error || "Analysis failed";
+            set({ error: errMsg });
+            return null;
+        }
+    },
+
+    formatPost: async id => {
+        try {
+            const { data } = await apiFormatPost(id);
+            set({
+                posts: get().posts.map(p => (p._id === id ? data : p)),
+            });
+            return data;
+        } catch (err) {
+            const errMsg = err.response?.data?.error || "Formatting failed";
             set({ error: errMsg });
             return null;
         }

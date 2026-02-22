@@ -4,7 +4,7 @@ const Post = require("../models/Post");
 const User = require("../models/User");
 const auth = require("../middleware/auth");
 const { saveLimiter, aiLimiter } = require("../middleware/rateLimit");
-const { analyzePost, generateSearchTerms } = require("../services/ollama");
+const { analyzePost, generateSearchTerms, formatPostText } = require("../services/ollama");
 
 const router = express.Router();
 
@@ -142,6 +142,30 @@ router.post("/", saveLimiter, async (req, res) => {
         res.status(201).json(post);
     } catch (err) {
         res.status(500).json({ error: "Failed to save post" });
+    }
+});
+
+// Format a post's text using AI
+router.post("/:id/format", aiLimiter, async (req, res) => {
+    try {
+        const post = await Post.findOne({ _id: req.params.id, userId: req.userId });
+        if (!post) return res.status(404).json({ error: "Post not found" });
+
+        const quota = await checkAiQuota(req.userId);
+        if (!quota.allowed) {
+            return res.status(429).json({ error: "Daily AI limit reached" });
+        }
+
+        const formattedText = await formatPostText(post.postText);
+        if (formattedText && formattedText !== post.postText) {
+            post.postText = formattedText;
+            await post.save();
+        }
+
+        res.json(post);
+    } catch (err) {
+        console.error("Format post error:", err.message);
+        res.status(500).json({ error: "Failed to format post" });
     }
 });
 

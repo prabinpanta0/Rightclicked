@@ -117,11 +117,12 @@ const TrashIcon = () => (
 );
 
 export default function PostCard({ post }) {
-    const { removePost, updateTags, reanalyze, silentRefresh } = usePostStore();
+    const { removePost, updateTags, reanalyze, formatPost, silentRefresh } = usePostStore();
     const [expanded, setExpanded] = useState(false);
     const [tagInput, setTagInput] = useState("");
     const [showTagInput, setShowTagInput] = useState(false);
     const [analyzing, setAnalyzing] = useState(false);
+    const [formatting, setFormatting] = useState(false);
     const [expandOpen, setExpandOpen] = useState(false);
 
     const authorDisplay = post.authorName || "Unknown Author";
@@ -176,6 +177,15 @@ export default function PostCard({ post }) {
             }
         } finally {
             setAnalyzing(false);
+        }
+    }
+
+    async function handleFormat() {
+        setFormatting(true);
+        try {
+            await formatPost(post._id);
+        } finally {
+            setFormatting(false);
         }
     }
 
@@ -390,6 +400,14 @@ export default function PostCard({ post }) {
                     className="px-3 py-1.5 rounded-md text-muted hover:text-linkedin hover:bg-accent transition-colors disabled:opacity-50"
                 >
                     {analyzing ? "Analyzing…" : post.aiAnalyzed ? "Re-analyze" : "Analyze"}
+                </button>
+                <button
+                    onClick={handleFormat}
+                    disabled={formatting}
+                    className="px-3 py-1.5 rounded-md text-muted hover:text-linkedin hover:bg-accent transition-colors disabled:opacity-50"
+                    title="Use AI to restore missing paragraphs and spaces"
+                >
+                    {formatting ? "Formatting…" : "Format Text"}
                 </button>
                 <button
                     onClick={() => setExpandOpen(true)}

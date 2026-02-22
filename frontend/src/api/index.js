@@ -47,6 +47,8 @@ export const deletePost = id => api.delete(`/posts/${id}`);
 
 export const analyzePost = id => api.post(`/posts/${id}/analyze`);
 
+export const formatPost = id => api.post(`/posts/${id}/format`);
+
 // Batch analyze
 export const batchAnalyze = () => api.post("/posts/analyze-batch");
 

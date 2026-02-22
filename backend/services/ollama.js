@@ -42,7 +42,9 @@ function buildHeaders() {
 // including `format: "json"` and `options`. We include them everywhere.
 function buildRequestBody(base, extra = {}) {
     const body = { ...base, model: OLLAMA_MODEL, stream: false };
-    body.format = "json";
+    if (extra.format !== false) {
+        body.format = "json";
+    }
     if (extra.options) body.options = extra.options;
     return body;
 }
@@ -742,4 +744,41 @@ async function generateSearchTerms(query) {
     }
 }
 
-module.exports = { analyzePost, fallbackAnalysis, generateSearchTerms };
+// ── Text formatting prompt ──────────────────────────────────
+
+const FORMAT_PROMPT = `You are a text formatting assistant. The user will provide a text that has lost its paragraph breaks and spaces after punctuation.
+Your task is to restore the original formatting by adding paragraphs (using \\n\\n) and fixing missing spaces after punctuation.
+Do not change the words, do not summarize, do not add any conversational filler. Just output the formatted text.`;
+
+async function formatPostText(postText) {
+    try {
+        const body = buildRequestBody(
+            {
+                system: FORMAT_PROMPT,
+                prompt: `Format this text:\n\n${postText}`,
+            },
+            { format: false, options: { temperature: 0.1, num_predict: 2000 } },
+        );
+
+        const res = await fetch(`${OLLAMA_BASE}/api/generate`, {
+            method: "POST",
+            headers: buildHeaders(),
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(IS_CLOUD ? 15000 : 60000),
+        });
+        if (res.status === 429) {
+            console.warn("[AI] Cloud rate limit hit (429) during text formatting");
+            throw new Error("Rate limit exceeded");
+        }
+        if (!res.ok) throw new Error(`Ollama returned ${res.status}`);
+        const data = await res.json();
+        const raw = (data.response || "").trim();
+
+        return raw || postText;
+    } catch (err) {
+        console.error("AI text formatting failed:", err.message);
+        return postText;
+    }
+}
+
+module.exports = { analyzePost, fallbackAnalysis, generateSearchTerms, formatPostText };
