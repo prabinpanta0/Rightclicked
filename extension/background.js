@@ -129,16 +129,29 @@ async function savePost(postData) {
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
             body: JSON.stringify(postData),
         });
-        const data = await res.json();
+        const raw = await res.text();
+        const data = tryParseJson(raw);
         if (res.status === 429) {
             GlobalRateLimit.backoff(30);
             return { success: false, error: "Too many requests — please wait" };
         }
-        if (!res.ok) throw new Error(data.error || "Save failed");
+        if (!res.ok) {
+            const msg = data?.error || data?.message || raw || "Save failed";
+            throw new Error(typeof msg === "string" ? msg.slice(0, 220) : "Save failed");
+        }
         const accountLabel = await getAccountLabel(token);
-        return { success: true, post: data, accountLabel };
+        return { success: true, post: data || {}, accountLabel };
     } catch (err) {
         return { success: false, error: err.message };
+    }
+}
+
+function tryParseJson(raw) {
+    if (!raw || typeof raw !== "string") return null;
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
     }
 }
 

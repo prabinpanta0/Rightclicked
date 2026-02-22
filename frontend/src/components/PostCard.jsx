@@ -34,6 +34,29 @@ function getParagraphs(text) {
         .filter(Boolean);
 }
 
+function normalizeTagKey(value) {
+    return String(value || "")
+        .toLowerCase()
+        .replace(/^#+/, "")
+        .replace(/[^a-z0-9\s-]/g, " ")
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "")
+        .trim();
+}
+
+function dedupeTags(list) {
+    const out = [];
+    const seen = new Set();
+    for (const item of list || []) {
+        const key = normalizeTagKey(item);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(key);
+    }
+    return out;
+}
+
 /** Extract hashtags from text and return { cleaned, hashtags } */
 function extractHashtags(text) {
     if (!text) return { cleaned: text, hashtags: [] };
@@ -104,19 +127,20 @@ export default function PostCard({ post }) {
     const authorDisplay = post.authorName || "Unknown Author";
     const sentimentCfg = SENTIMENT_CONFIG[post.sentiment] || SENTIMENT_DEFAULT;
 
-    const tags = Array.isArray(post.allTags)
+    const rawTags = Array.isArray(post.allTags)
         ? post.allTags
         : Array.isArray(post.tags)
           ? post.tags
           : post.tags
             ? [post.tags]
             : [];
+    const tags = dedupeTags(rawTags);
 
     const formatted = formatPostText(post.postText);
     const { cleaned: cleanedText, hashtags: extractedHashtags } = extractHashtags(formatted);
     const paragraphs = getParagraphs(cleanedText);
-    const allKeywords = [...new Set([...(post.keywords || []), ...extractedHashtags])].filter(
-        kw => !tags.some(t => t.toLowerCase() === kw.toLowerCase().replace(/^#/, "")),
+    const allKeywords = dedupeTags([...(post.keywords || []), ...extractedHashtags]).filter(
+        kw => !tags.some(t => normalizeTagKey(t) === normalizeTagKey(kw)),
     );
     const textPreview = cleanedText?.length > 280 && !expanded ? cleanedText.slice(0, 280) + "…" : cleanedText;
 

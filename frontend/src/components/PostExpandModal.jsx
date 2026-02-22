@@ -53,6 +53,29 @@ function getParagraphs(text) {
         .filter(Boolean);
 }
 
+function normalizeTagKey(value) {
+    return String(value || "")
+        .toLowerCase()
+        .replace(/^#+/, "")
+        .replace(/[^a-z0-9\s-]/g, " ")
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "")
+        .trim();
+}
+
+function dedupeTags(list) {
+    const out = [];
+    const seen = new Set();
+    for (const item of list || []) {
+        const key = normalizeTagKey(item);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(key);
+    }
+    return out;
+}
+
 function extractHashtags(text) {
     if (!text) return { cleaned: text, hashtags: [] };
     const hashtagRe = /#([\w]+)/g;
@@ -106,18 +129,21 @@ export default function PostExpandModal({ post, onClose }) {
     const sentimentCfg = SENTIMENT_CONFIG[post.sentiment] || SENTIMENT_DEFAULT;
     const timeDisplay = post.timestamp ? relativeTime(post.timestamp) : `Saved ${relativeTime(post.dateSaved)}`;
 
-    const tags = Array.isArray(post.allTags)
+    const rawTags = Array.isArray(post.allTags)
         ? post.allTags
         : Array.isArray(post.tags)
           ? post.tags
           : post.tags
             ? [post.tags]
             : [];
+    const tags = dedupeTags(rawTags);
 
     const formatted = formatPostText(post.postText);
     const { cleaned: cleanedText, hashtags: extractedHashtags } = extractHashtags(formatted);
     const paragraphs = getParagraphs(cleanedText);
-    const allKeywords = [...new Set([...(post.keywords || []), ...extractedHashtags])];
+    const allKeywords = dedupeTags([...(post.keywords || []), ...extractedHashtags]).filter(
+        kw => !tags.some(t => normalizeTagKey(t) === normalizeTagKey(kw)),
+    );
 
     const likesStr = humanNumber(post.engagement?.likes);
     const commentsStr = humanNumber(post.engagement?.comments);

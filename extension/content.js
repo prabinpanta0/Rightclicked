@@ -177,6 +177,16 @@ function findMostVisiblePost() {
     return best;
 }
 
+function isElementMostlyVisible(el) {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    if (r.width < 220 || r.height < 80) return false;
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+    if (r.bottom <= 0 || r.top >= vh || r.right <= 0 || r.left >= vw) return false;
+    return true;
+}
+
 // 2) Data extraction
 
 // LinkedIn nests comments inside the same post container.
@@ -264,9 +274,17 @@ function getCleanText(el) {
     // Strip visually-hidden / screen-reader-only duplicates
     clone.querySelectorAll('.visually-hidden, [class*="visually-hidden"]').forEach(n => n.remove());
 
-    // innerText preserves line breaks for <br> and block boundaries,
-    // which keeps paragraphs readable in the app.
-    const raw = (clone.innerText || clone.textContent || "").replace(/\u00a0/g, " ").trim();
+    // Preserve line breaks in detached DOM:
+    // convert <br> and block boundaries to explicit newlines before reading text.
+    clone.querySelectorAll("br").forEach(br => {
+        br.replaceWith(document.createTextNode("\n"));
+    });
+    clone.querySelectorAll("p, div, li, section, article, h1, h2, h3, h4, h5, h6, blockquote").forEach(node => {
+        if (node.firstChild) node.insertBefore(document.createTextNode("\n"), node.firstChild);
+        node.appendChild(document.createTextNode("\n"));
+    });
+
+    const raw = (clone.textContent || "").replace(/\u00a0/g, " ").trim();
     if (!raw) return "";
 
     return raw
@@ -287,11 +305,32 @@ function findAuthorInSection(section) {
     ) {
         return null;
     }
+    const badLineRe =
+        /(likes this|commented on this|reposted this|repost\b|shared this|promoted|sponsored|follow\b|view .* link)/i;
+    const candidates = [];
+
     for (const a of section.querySelectorAll('a[href*="/in/"], a[href*="/company/"]')) {
-        const t = a.innerText.trim().split("\n")[0].trim();
-        if (t.length > 0 && t.length < 100) {
-            return { name: t, url: a.href };
-        }
+        const t = (a.innerText || "").trim().split("\n")[0].trim();
+        if (!t || t.length >= 100) continue;
+
+        const line = (a.closest("div, span, p")?.innerText || a.innerText || "").trim();
+        if (badLineRe.test(line)) continue;
+
+        let score = 0;
+        if (a.href.includes("/in/")) score += 12;
+        if (a.href.includes("/company/")) score += 8;
+        if (a.closest('[class*="update-components-actor__meta"], [class*="feed-shared-actor__meta"]')) score += 12;
+        if (a.closest('[class*="update-components-actor"], [class*="feed-shared-actor"]')) score += 8;
+        if (a.closest('[class*="feed-shared-header"], [class*="update-components-header"]')) score += 3;
+        if (/\b(\d(st|nd|rd|th)\+?)\b/.test(line)) score += 2; // LinkedIn degree hint often near real author
+        if (/^view\s/i.test(t) || /\bgraphic link\b/i.test(t)) score -= 20;
+
+        candidates.push({ name: t, url: a.href, score });
+    }
+
+    if (candidates.length > 0) {
+        candidates.sort((a, b) => b.score - a.score);
+        return { name: candidates[0].name, url: candidates[0].url };
     }
     return null;
 }
@@ -321,21 +360,32 @@ function extractAuthor(container) {
         }
     }
 
-    // Strategy 2: Find first /in/ or /company/ link that is NOT inside a comment or dropdown
+    // Strategy 2/3: Score links globally and pick strongest candidate.
+    const badLineRe =
+        /(likes this|commented on this|reposted this|repost\b|shared this|promoted|sponsored|follow\b|view .* link)/i;
+    const globalCandidates = [];
     for (const a of container.querySelectorAll('a[href*="/in/"], a[href*="/company/"]')) {
         if (shouldSkipElement(a, container)) continue;
-        const t = a.innerText.trim().split("\n")[0].trim();
-        if (t.length > 0 && t.length < 100) {
-            return { name: t, url: a.href };
-        }
-    }
 
-    // Strategy 3: Fallback -- first link anywhere
-    for (const a of container.querySelectorAll('a[href*="/in/"], a[href*="/company/"]')) {
-        const t = a.innerText.trim().split("\n")[0].trim();
-        if (t.length > 0 && t.length < 100) {
-            return { name: t, url: a.href };
-        }
+        const t = (a.innerText || "").trim().split("\n")[0].trim();
+        if (!t || t.length >= 100) continue;
+        const line = (a.closest("div, span, p")?.innerText || a.innerText || "").trim();
+        if (badLineRe.test(line)) continue;
+
+        let score = 0;
+        if (a.href.includes("/in/")) score += 12;
+        if (a.href.includes("/company/")) score += 8;
+        if (a.closest('[class*="update-components-actor__meta"], [class*="feed-shared-actor__meta"]')) score += 12;
+        if (a.closest('[class*="update-components-actor"], [class*="feed-shared-actor"]')) score += 8;
+        if (a.closest('[class*="feed-shared-header"], [class*="update-components-header"]')) score += 3;
+        if (/\b(\d(st|nd|rd|th)\+?)\b/.test(line)) score += 2;
+        if (/^view\s/i.test(t) || /\bgraphic link\b/i.test(t)) score -= 20;
+
+        globalCandidates.push({ name: t, url: a.href, score });
+    }
+    if (globalCandidates.length > 0) {
+        globalCandidates.sort((a, b) => b.score - a.score);
+        return { name: globalCandidates[0].name, url: globalCandidates[0].url };
     }
 
     return { name: "Unknown Author", url: "" };
@@ -526,14 +576,111 @@ function safeSendMessage(msg, cb) {
 // 4) Context-menu extraction + notification handler
 
 let lastRightClickedElement = null;
+let lastRightClickedContainer = null;
+let lastRightClickPostData = null;
+let lastRightClickTs = 0;
+let lastPointerElement = null;
+let lastPointerTs = 0;
 let _lastRightClickTimeout = null;
+let _lastPointerSampleTs = 0;
+
+document.addEventListener(
+    "mousemove",
+    e => {
+        const now = Date.now();
+        if (now - _lastPointerSampleTs < 180) return;
+        _lastPointerSampleTs = now;
+        lastPointerElement = e.target;
+        lastPointerTs = now;
+    },
+    true,
+);
+
 document.addEventListener("contextmenu", e => {
     lastRightClickedElement = e.target;
+    lastRightClickedContainer = findPostContainer(e.target);
+    lastRightClickTs = Date.now();
+    if (lastRightClickedContainer) {
+        const pre = extractPostData(lastRightClickedContainer);
+        if (pre?.postText) {
+            lastRightClickPostData = pre;
+        }
+    }
     clearTimeout(_lastRightClickTimeout);
     _lastRightClickTimeout = setTimeout(() => {
         lastRightClickedElement = null;
+        lastRightClickedContainer = null;
+        lastRightClickPostData = null;
     }, 10000);
 });
+
+function isGoodExtraction(data) {
+    if (!data || !data.postText) return false;
+    if (data.postText.length < 40) return false;
+    if (!data.authorName || /unknown author/i.test(data.authorName)) return false;
+    return true;
+}
+
+function resolveBestContainer({ source = "unknown", preferredContainer = null } = {}) {
+    const candidates = [];
+    if (preferredContainer) candidates.push(preferredContainer);
+
+    if (source === "context-menu") {
+        if (lastRightClickedContainer && document.contains(lastRightClickedContainer)) {
+            candidates.push(lastRightClickedContainer);
+        }
+        if (lastRightClickedElement && document.contains(lastRightClickedElement)) {
+            const fromTarget = findPostContainer(lastRightClickedElement);
+            if (fromTarget) candidates.push(fromTarget);
+        }
+    }
+
+    // For popup and menu flows, prefer what user was most recently hovering.
+    if ((source === "popup" || source === "menu-injected") && lastPointerElement && Date.now() - lastPointerTs < 8000) {
+        const fromPointer = findPostContainer(lastPointerElement);
+        if (fromPointer) candidates.push(fromPointer);
+    }
+
+    const visible = findMostVisiblePost();
+    if (visible) candidates.push(visible);
+    for (const c of getAllPostContainers().slice(0, 24)) {
+        if (isElementMostlyVisible(c)) candidates.push(c);
+    }
+
+    const seen = new Set();
+    let best = null;
+    let bestScore = -1;
+
+    for (const c of candidates) {
+        if (!c || seen.has(c)) continue;
+        seen.add(c);
+
+        const data = extractPostData(c);
+        if (!data?.postText) continue;
+
+        let score = Math.min(data.postText.length, 8000) / 100;
+        if (data.authorName && !/unknown author/i.test(data.authorName)) score += 20;
+        if (data.postUrl?.includes("/feed/update/")) score += 5;
+        if (isElementMostlyVisible(c)) score += 20;
+
+        const r = c.getBoundingClientRect();
+        const center = window.innerHeight / 2;
+        const mid = (r.top + r.bottom) / 2;
+        const dist = Math.abs(mid - center);
+        score += Math.max(0, 18 - dist / 40);
+
+        if (source === "context-menu" && c === lastRightClickedContainer && Date.now() - lastRightClickTs < 20_000) {
+            score += 30;
+        }
+
+        if (score > bestScore) {
+            bestScore = score;
+            best = c;
+        }
+    }
+
+    return best;
+}
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.action === "extractPost") {
@@ -543,19 +690,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // - fallback: best effort
         const source = message.source || "unknown";
 
+        // Fast path: for context-menu saves, use extraction captured at right-click time.
+        if (
+            source === "context-menu" &&
+            lastRightClickPostData &&
+            Date.now() - lastRightClickTs < 20_000 &&
+            isGoodExtraction(lastRightClickPostData)
+        ) {
+            sendResponse({ postData: lastRightClickPostData, cached: true });
+            return true;
+        }
+
         let container = null;
         if (source === "context-menu") {
-            if (lastRightClickedElement && document.contains(lastRightClickedElement)) {
-                container = findPostContainer(lastRightClickedElement);
-            }
-            if (!container) container = findMostVisiblePost();
+            container = resolveBestContainer({ source, preferredContainer: lastRightClickedContainer });
         } else if (source === "popup") {
-            container = findMostVisiblePost();
+            container = resolveBestContainer({ source });
         } else {
-            if (lastRightClickedElement && document.contains(lastRightClickedElement)) {
-                container = findPostContainer(lastRightClickedElement);
-            }
-            if (!container) container = findMostVisiblePost();
+            container = resolveBestContainer({ source });
         }
 
         if (container) {
@@ -630,7 +782,11 @@ function savePostFromUI(container) {
         showToast(false, "Extension updated — please reload this page");
         return;
     }
-    const postData = extractPostData(container);
+    let postData = extractPostData(container);
+    if (!postData?.postText) {
+        const fallback = resolveBestContainer({ source: "save-ui", preferredContainer: container });
+        if (fallback) postData = extractPostData(fallback);
+    }
     if (!postData.postText) {
         showToast(false, "Couldn't extract post content");
         return;
@@ -919,7 +1075,10 @@ function _injectSaveOption(content, trigger, dropdown) {
         // exact post whose menu the user opened, not another visible post.
         // We delay slightly to let the dropdown close and clear the DOM.
         setTimeout(() => {
-            const container = findPostContainer(trigger) || findPostContainer(content) || findMostVisiblePost();
+            const container = resolveBestContainer({
+                source: "menu-injected",
+                preferredContainer: findPostContainer(trigger) || findPostContainer(content),
+            });
             if (!container) {
                 showToast(false, "No LinkedIn post found");
                 return;

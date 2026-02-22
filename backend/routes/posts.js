@@ -10,6 +10,30 @@ const router = express.Router();
 
 router.use(auth);
 
+function normalizeTag(tag) {
+    return String(tag || "")
+        .toLowerCase()
+        .replace(/^#+/, "")
+        .replace(/[^a-z0-9\s-]/g, " ")
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "")
+        .trim();
+}
+
+function dedupeTags(input) {
+    if (!Array.isArray(input)) return [];
+    const out = [];
+    const seen = new Set();
+    for (const raw of input) {
+        const normalized = normalizeTag(raw);
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        out.push(normalized);
+    }
+    return out;
+}
+
 // ── AI quota helper ──────────────────────────────────────────────
 // Checks and increments the user's daily AI usage. Returns { allowed, remaining, limit }.
 async function checkAiQuota(userId) {
@@ -78,7 +102,7 @@ router.post("/", saveLimiter, async (req, res) => {
             postUrl: postUrl || "",
             timestamp: timestamp || "",
             dateSaved: dateSaved || new Date(),
-            tags: tags || [],
+            tags: dedupeTags(tags || []),
             engagement: {
                 likes: engagement?.likes || 0,
                 comments: engagement?.comments || 0,
@@ -104,9 +128,7 @@ router.post("/", saveLimiter, async (req, res) => {
                     if (analysis.summary) update.summary = analysis.summary;
                     if (analysis.sentiment) update.sentiment = analysis.sentiment;
                     if (analysis.tags?.length > 0) {
-                        const existingTags = new Set(post.tags || []);
-                        analysis.tags.forEach(t => existingTags.add(t));
-                        update.tags = [...existingTags];
+                        update.tags = dedupeTags([...(post.tags || []), ...analysis.tags]);
                     }
                     const updated = await Post.findByIdAndUpdate(post._id, update, { new: true });
                     return res.status(201).json(updated);
@@ -489,7 +511,12 @@ router.patch("/engagement-by-url", async (req, res) => {
 router.patch("/:id/tags", async (req, res) => {
     try {
         const { tags } = req.body;
-        const post = await Post.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, { tags }, { new: true });
+        const cleanTags = dedupeTags(tags || []);
+        const post = await Post.findOneAndUpdate(
+            { _id: req.params.id, userId: req.userId },
+            { tags: cleanTags },
+            { new: true },
+        );
         if (!post) return res.status(404).json({ error: "Post not found" });
         res.json(post);
     } catch (err) {
@@ -529,9 +556,7 @@ router.post("/:id/analyze", aiLimiter, async (req, res) => {
         post.summary = analysis.summary || post.summary;
         post.sentiment = analysis.sentiment || post.sentiment;
         if (analysis.tags?.length > 0) {
-            const allTags = new Set(post.tags || []);
-            analysis.tags.forEach(t => allTags.add(t));
-            post.tags = [...allTags];
+            post.tags = dedupeTags([...(post.tags || []), ...analysis.tags]);
         }
         post.aiAnalyzed = true;
         await post.save();
@@ -569,9 +594,7 @@ router.post("/analyze-batch", aiLimiter, async (req, res) => {
                 post.summary = analysis.summary || post.summary;
                 post.sentiment = analysis.sentiment || post.sentiment;
                 if (analysis.tags?.length > 0) {
-                    const allTags = new Set(post.tags || []);
-                    analysis.tags.forEach(t => allTags.add(t));
-                    post.tags = [...allTags];
+                    post.tags = dedupeTags([...(post.tags || []), ...analysis.tags]);
                 }
                 post.aiAnalyzed = true;
                 await post.save();
