@@ -4,6 +4,7 @@ import { useAuthStore } from "../store/useAuthStore";
 const GITHUB_REPO = "https://github.com/prabinpanta0/Rightclicked";
 const GITHUB_RELEASES = `${GITHUB_REPO}/releases`;
 const GITHUB_EXT_ZIP = "https://github.com/prabinpanta0/Rightclicked/releases/download/extension/Rightclicked.zip";
+const EXTENSION_ZIP_URL = import.meta.env.VITE_EXTENSION_ZIP_URL || GITHUB_EXT_ZIP;
 
 const steps = [
     {
@@ -79,7 +80,7 @@ export default function Download() {
                 {/* Download buttons */}
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-12">
                     <a
-                        href={GITHUB_EXT_ZIP}
+                        href={EXTENSION_ZIP_URL}
                         className="inline-flex items-center gap-2 px-6 py-3 bg-linkedin text-white font-medium rounded-lg hover:bg-linkedin-dark transition-colors shadow-sm"
                     >
                         <svg

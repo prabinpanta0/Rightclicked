@@ -66,6 +66,7 @@ Required env vars:
 | ----------------------- | ------------------------------------------------ |
 | VITE_API_URL            | Backend API URL (e.g. http://localhost:3001/api) |
 | VITE_RECAPTCHA_SITE_KEY | Google reCAPTCHA v3 site key                     |
+| VITE_EXTENSION_ZIP_URL  | Optional override for extension ZIP download link |
 
 ### Extension
 
@@ -83,7 +84,7 @@ Posts are analyzed automatically when saved. The backend sends the post text to 
 - Topic classification
 - Keyword extraction
 - Short summary
-- Sentiment (positive, negative, neutral, mixed)
+- Sentiment category (`educational`, `inspirational`, `controversial`, `promotional`, `hiring`, `opinion`, `news`, `personal_story`)
 - Suggested tags
 
 Analysis runs inline before the save response is sent. If the AI is unavailable or the daily quota is reached, the post is saved without analysis. You can manually trigger analysis later from the dashboard.
@@ -96,7 +97,7 @@ Both backend and frontend are deployed on Vercel. The extension is distributed a
 
 Backend Vercel env vars: same as the backend table above, plus set FRONTEND_URL to your frontend domain.
 
-Frontend Vercel env vars: set VITE_API_URL to your backend URL (e.g. https://rightclicked-backend.vercel.app/api).
+Frontend Vercel env vars: set VITE_API_URL to your backend URL (e.g. https://rightclicked-backend.vercel.app/api). Optionally set VITE_EXTENSION_ZIP_URL so extension release updates do not require frontend code changes.
 
 ## Tech Stack
 
