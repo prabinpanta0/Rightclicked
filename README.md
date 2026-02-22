@@ -62,10 +62,10 @@ npm run dev
 
 Required env vars:
 
-| Variable                | Description                                      |
-| ----------------------- | ------------------------------------------------ |
-| VITE_API_URL            | Backend API URL (e.g. http://localhost:3001/api) |
-| VITE_RECAPTCHA_SITE_KEY | Google reCAPTCHA v3 site key                     |
+| Variable                | Description                                       |
+| ----------------------- | ------------------------------------------------- |
+| VITE_API_URL            | Backend API URL (e.g. http://localhost:3001/api)  |
+| VITE_RECAPTCHA_SITE_KEY | Google reCAPTCHA v3 site key                      |
 | VITE_EXTENSION_ZIP_URL  | Optional override for extension ZIP download link |
 
 ### Extension
