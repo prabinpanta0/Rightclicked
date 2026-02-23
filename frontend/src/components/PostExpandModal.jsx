@@ -232,6 +232,23 @@ export default function PostExpandModal({ post, onClose }) {
                     </div>
                 </div>
 
+                {/* Post Images */}
+                {Array.isArray(post.images) && post.images.some(img => img?.base64) && (
+                    <div className="px-6 pb-5 flex flex-col gap-3">
+                        {post.images
+                            .filter(img => img?.base64)
+                            .map((img, i) => (
+                                <img
+                                    key={i}
+                                    src={img.base64}
+                                    alt={img.alt || "Post image"}
+                                    className="w-full rounded-xl object-contain max-h-[28rem]"
+                                    loading="lazy"
+                                />
+                            ))}
+                    </div>
+                )}
+
                 {/* Keywords & Hashtags */}
                 {allKeywords.length > 0 && (
                     <div className="px-6 pb-4 flex flex-wrap items-center gap-1.5">

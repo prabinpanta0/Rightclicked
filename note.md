@@ -70,13 +70,13 @@ Scraping means using bots or automated tools to **visit many pages, collect data
 
 **Rightclicked does none of these things.** Here's why:
 
-| Scraping Behavior                       | Rightclicked Behavior                                                                                    |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Bot visits pages automatically          | User browses LinkedIn normally; saves happen only when the user clicks a button                          |
-| Headless browser / Puppeteer / Selenium | Real Chrome browser with the user present and logged in                                                  |
-| Crawls profiles, search results, etc.   | Only reads the one post the user is looking at on their feed                                             |
-| Makes HTTP requests to LinkedIn servers | Reads from the DOM that LinkedIn already loaded in the browser — zero extra network requests to LinkedIn |
-| Runs 24/7 without human interaction     | Only runs when the user explicitly triggers a save                                                       |
+| Scraping Behavior                       | Rightclicked Behavior                                                                                                            |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Bot visits pages automatically          | User browses LinkedIn normally; saves happen only when the user clicks a button                                                  |
+| Headless browser / Puppeteer / Selenium | Real Chrome browser with the user present and logged in                                                                          |
+| Crawls profiles, search results, etc.   | Only reads the one post the user is looking at on their feed                                                                     |
+| Makes HTTP requests to LinkedIn servers | Reads post text/metadata from the DOM (zero requests). Post images are read from the browser's local disk cache (`force-cache`). |
+| Runs 24/7 without human interaction     | Only runs when the user explicitly triggers a save                                                                               |
 
 ### Built-in protections (what we actually implemented)
 
@@ -112,9 +112,14 @@ LinkedIn can detect extensions by looking for known CSS class names or DOM eleme
 
 If your LinkedIn tab is in the background (hidden), the extension stops all activity. Background DOM reads while the tab isn't visible are a strong bot signal.
 
-#### 6. No network requests to LinkedIn
+#### 6. Near-zero network requests to LinkedIn
 
-The extension **never makes HTTP requests to LinkedIn's servers**. All data is read from the DOM that LinkedIn already rendered in your browser. The only network requests go to our own backend server to save the post. From LinkedIn's perspective, your browsing session looks completely normal.
+The extension **never makes HTTP requests to LinkedIn's servers for post text or metadata** — all of that is read from the DOM. For post images (optional), the extension reads image bytes from the **browser's local disk cache** using `fetch(url, { cache: "force-cache", credentials: "omit" })`:
+
+- **`force-cache`**: tells the browser to return the already-cached copy from disk — the same image LinkedIn downloaded to render the post — without contacting any server. No HTTP request leaves the browser in the normal case.
+- **`credentials: "omit"`**: even in the rare case where a cache miss forces a network fetch (e.g. cache was evicted), the request carries **no LinkedIn session cookies**. From LinkedIn's CDN (`media.licdn.com`) it looks like an anonymous public resource request — the CDN already uses `Access-Control-Allow-Origin: *`.
+
+From LinkedIn's perspective your browsing session looks completely normal in either path.
 
 #### 7. reCAPTCHA on the backend
 
@@ -133,10 +138,65 @@ Rightclicked is a **personal productivity tool** that helps you organize posts y
 
 ### Summary of protections
 
-| Layer             | Protection                                                                                        |
-| ----------------- | ------------------------------------------------------------------------------------------------- |
-| Content script    | Rate limiter (1.5s cooldown, 30/min cap), page visibility check, scraping policy allow/block list |
-| DOM interaction   | Zero background scanning, event-delegation only, randomized element prefixes, inline styles       |
-| Background worker | Global rate limiter (60/min), exponential back-off on errors                                      |
-| Backend server    | Rate limiting (10 saves/min), JWT authentication, reCAPTCHA verification, Helmet security headers |
-| Architecture      | No HTTP requests to LinkedIn, reads only from already-loaded DOM, user-initiated actions only     |
+| Layer             | Protection                                                                                                                                                                                                                       |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Content script    | Rate limiter (1.5s cooldown, 30/min cap), page visibility check, scraping policy allow/block list                                                                                                                                |
+| DOM interaction   | Zero background scanning, event-delegation only, randomized element prefixes, inline styles                                                                                                                                      |
+| Background worker | Global rate limiter (60/min), exponential back-off on errors                                                                                                                                                                     |
+| Backend server    | Rate limiting (10 saves/min), JWT authentication, reCAPTCHA verification, Helmet security headers                                                                                                                                |
+| Architecture      | Post text/metadata: zero LinkedIn network requests (DOM-only). Post images: browser disk cache (`force-cache + credentials: omit`), sequential fetches with 200–500 ms random delay, validateImageIntegrity check before storage |
+
+---
+
+## Image Pipeline
+
+### How post images are captured
+
+When you save a post the extension optionally captures the primary content image(s) attached to it (not profile pictures or avatars). The full pipeline:
+
+```
+LinkedIn DOM (content.js)
+  └─ findMainImageInPost()        — locates <img> elements inside post media containers
+      ├─ POST_IMAGE_CLASS_WHITELIST  (update-components-image__image, feed-shared-image__image, evi-image)
+      │     positive match → accept immediately
+      ├─ PFP_CLASS_FRAGMENTS         ancestor class check → reject if it's an avatar
+      └─ size gate (≥ 200×200 px, reads rendered rect / naturalWidth / HTML attributes)
+
+  └─ fetchImagesFromCache()       — fetches image bytes from the browser's disk cache
+      ├─ fetch(url, { cache: "force-cache", credentials: "omit" })
+      ├─ compressImageBlob()        — Canvas API: scale to ≤ 1200 px longest edge, re-encode JPEG @82%
+      └─ returns base64 data-URI
+
+background.js
+  └─ fetchImagesViaTab()          — routes fetch request to content script (cache partition fix)
+  └─ validateImageIntegrity()     — confirms prefix is data:image/(jpeg|png|webp|gif);base64,
+  └─ relayToBackend()             — PATCH /posts/:id/images  (only validated payloads)
+
+backend/routes/posts.js
+  └─ PATCH /:id/images            — stores { url, base64, alt, mimeType } array on the Post document
+```
+
+### Why fetch runs in the content script, not the background service worker
+
+Chrome 86+ implements **HTTP cache partitioning**: the cache key is `(top-frame-origin, url)`.
+
+- When LinkedIn's page loads an image, it is cached under the `linkedin.com` top-frame.
+- A fetch from the background service worker uses `chrome-extension://` as its top-frame — a completely different partition. It would always miss the cache and hit the CDN.
+- Running the fetch inside `content.js` shares the `linkedin.com` cache partition, so `force-cache` returns the already-downloaded bytes from disk.
+
+### Image filtering — how we avoid profile pictures
+
+LinkedIn applies several class names to both profile pictures and post content images, making naive class-matching unreliable. Our approach:
+
+1. **Positive whitelist first** (`POST_IMAGE_CLASS_WHITELIST`): classes LinkedIn uses _exclusively_ on post content images trigger an immediate accept.
+2. **Ancestor PFP check** (`PFP_CLASS_FRAGMENTS`): if no whitelist class is present, walk up the ancestor chain and reject if any ancestor has a known avatar/actor/profile-picture class.
+3. **Profile-link check**: reject images wrapped in `<a href="/in/...">` links that don't also contain `/posts/` or `/feed/` (those are avatar links, not post image links).
+4. **Comment filter**: always reject images inside comment sections regardless of class.
+5. **Size gate**: reject anything smaller than 200×200 px. Reads `getBoundingClientRect()` first, then `naturalWidth/naturalHeight`, then HTML `width`/`height` attributes (needed for lazy-loaded images that report 0 until decoded).
+
+### Storage notes
+
+- Images are stored as base64 JPEG strings in the `images[]` array on the `Post` MongoDB document.
+- Canvas compression reduces typical file sizes by **40–60 %** compared to the raw blob. A full-width LinkedIn post image typically compresses from ~150–400 KB to ~50–120 KB.
+- Only images passing `validateImageIntegrity()` (valid data-URI prefix) are accepted by the backend.
+- If image fetch fails (cache miss + network error), `base64` is stored as `null` and the save still succeeds — images are best-effort, not required.

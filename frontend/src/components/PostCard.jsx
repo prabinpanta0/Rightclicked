@@ -285,6 +285,23 @@ export default function PostCard({ post }) {
                 )}
             </div>
 
+            {/* ── Post Image ── */}
+            {Array.isArray(post.images) && post.images.some(img => img?.base64) && (
+                <div className="px-5 pb-3">
+                    {post.images
+                        .filter(img => img?.base64)
+                        .map((img, i) => (
+                            <img
+                                key={i}
+                                src={img.base64}
+                                alt={img.alt || "Post image"}
+                                className="w-full rounded-lg object-cover max-h-64"
+                                loading="lazy"
+                            />
+                        ))}
+                </div>
+            )}
+
             {/* ── Hashtags & Keywords (pills) ── */}
             {allKeywords.length > 0 && (
                 <div className="px-5 pb-3 flex flex-wrap items-center gap-1.5">

@@ -70,6 +70,18 @@ const postSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
         },
+        // Post content images fetched from the browser's disk cache
+        // and stored as base64 data-URIs.  Each entry also preserves the
+        // original CDN URL and the img element's alt text (useful for AI
+        // keyword extraction and accessibility display).
+        images: [
+            {
+                url: { type: String, default: "" },
+                base64: { type: String, default: "" },
+                alt: { type: String, default: "" },
+                mimeType: { type: String, default: "" },
+            },
+        ],
     },
     {
         timestamps: true,

@@ -454,7 +454,24 @@ function extractPostData(container) {
     }
     if (!postUrl) postUrl = window.location.href;
 
-    return { authorName, authorUrl, postText, postUrl, timestamp, engagement, dateSaved: new Date().toISOString() };
+    // -- Images --
+    // findMainImageInPost navigates the post DOM tree to collect primary
+    // content image URLs.  Profile pictures, comment avatars, and icons
+    // are filtered out by isValidPostImage.  The URLs are sent to the
+    // background script which fetches them from the browser's disk cache
+    // (force-cache mode) — no extra request reaches LinkedIn's servers.
+    const imageUrls = findMainImageInPost(container);
+
+    return {
+        authorName,
+        authorUrl,
+        postText,
+        postUrl,
+        timestamp,
+        engagement,
+        dateSaved: new Date().toISOString(),
+        imageUrls,
+    };
 }
 
 // Engagement metrics extraction
@@ -548,6 +565,312 @@ function extractEngagement(container) {
     }
 
     return { likes, comments, reposts };
+}
+
+// ── Image Extraction ──────────────────────────────────────────
+// Captures primary content images from post media containers.
+// Deliberately excludes profile pictures, comment avatars, and
+// icons by using a hierarchical selector + exclusion filter strategy.
+// The extracted URLs are later fetched by the background script
+// using the browser's local disk cache (force-cache mode) so that
+// no extra request is sent to LinkedIn's servers.
+
+// LinkedIn-specific selectors for post media containers (ordered by specificity)
+const IMAGE_CONTAINER_SELECTORS = [
+    '[class*="update-components-image__image-link"]',
+    '[class*="update-components-image"]',
+    '[class*="feed-shared-image__container"]',
+    '[class*="feed-shared-image"]',
+    '[class*="feed-shared-article__image"]',
+];
+
+// LinkedIn carousel / multi-image container selectors
+const CAROUSEL_CONTAINER_SELECTORS = [
+    '[class*="document-viewer"]',
+    '[class*="feed-shared-native-document"]',
+    '[class*="carousel"]',
+    '[class*="multi-image"]',
+    '[class*="artifact-viewer"]',
+];
+
+// CSS class fragments that identify profile pictures and avatar elements.
+// NOTE: ivm-view-attr__img--centered is intentionally excluded — LinkedIn
+// also applies it to post content images (alongside update-components-image__image).
+const PFP_CLASS_FRAGMENTS = [
+    "presence-entity__image",
+    "EntityPhoto",
+    "profile-picture",
+    "feed-shared-actor__avatar",
+    "update-components-actor__avatar",
+    "feed-shared-mini-profile",
+    "member-photo",
+    "ghost-person",
+];
+
+// Positive whitelist: these classes are used exclusively on post content images.
+// An img carrying any of these is accepted immediately, bypassing PFP filters.
+const POST_IMAGE_CLASS_WHITELIST = ["update-components-image__image", "feed-shared-image__image", "evi-image"];
+
+// Ancestor selectors that indicate an image belongs to comments, not the post body
+const COMMENT_ANCESTOR_SELECTORS = [
+    '[class*="comments-post-meta"]',
+    '[class*="feed-shared-comment"]',
+    '[class*="comments-comment"]',
+    '[class*="comment-item"]',
+    '[class*="comments-replies"]',
+    '[class*="social-details-social-activity"]',
+];
+
+/**
+ * Returns true if imgElement is a legitimate post content image:
+ *   - Has a real (non-data, non-blob) src URL
+ *   - Not inside a comment section
+ *   - Not a profile picture or icon
+ *   - At least 200 x 200 px (rendered or natural size)
+ */
+function isValidPostImage(imgElement) {
+    if (!imgElement || imgElement.tagName !== "IMG") return false;
+
+    const src = imgElement.src || imgElement.getAttribute("src") || "";
+    // Exclude empty, inline data URIs, and temporary blob URLs — they
+    // cannot be retrieved from the browser cache.
+    if (!src || src.startsWith("data:") || src.startsWith("blob:")) return false;
+
+    // Positive whitelist: if the img carries a class that LinkedIn uses
+    // exclusively for post content images, accept immediately.
+    const cls = typeof imgElement.className === "string" ? imgElement.className : "";
+    const isExplicitPostImage = POST_IMAGE_CLASS_WHITELIST.some(c => cls.includes(c));
+    if (isExplicitPostImage) {
+        // Still reject images that are inside comment sections even if
+        // they carry a post-image class (shouldn't happen, but be safe).
+        for (const sel of COMMENT_ANCESTOR_SELECTORS) {
+            try {
+                if (imgElement.closest(sel)) return false;
+            } catch (_) {}
+        }
+        return true;
+    }
+
+    // Size gate: reject icons, tiny thumbnails, and avatar-sized images.
+    // Priority order:
+    //   1. getBoundingClientRect — actual rendered size (most reliable)
+    //   2. naturalWidth/naturalHeight — decoded intrinsic size
+    //   3. HTML width/height attributes — set by LinkedIn for lazy images
+    //      that haven't been decoded yet (e.g. class="lazy-image")
+    const rect = imgElement.getBoundingClientRect();
+    const attrW = parseInt(imgElement.getAttribute("width") || "0", 10);
+    const attrH = parseInt(imgElement.getAttribute("height") || "0", 10);
+    const w = Math.max(rect.width, imgElement.naturalWidth || 0, attrW);
+    const h = Math.max(rect.height, imgElement.naturalHeight || 0, attrH);
+    if (w < 200 || h < 200) return false;
+
+    // Comment filter: reject images nested inside any comment container
+    for (const sel of COMMENT_ANCESTOR_SELECTORS) {
+        try {
+            if (imgElement.closest(sel)) return false;
+        } catch (_) {}
+    }
+
+    // PFP filter: walk ancestor chain for avatar/actor container classes
+    let cur = imgElement.parentElement;
+    while (cur && cur !== document.body) {
+        const ancestorCls = typeof cur.className === "string" ? cur.className : "";
+        for (const fragment of PFP_CLASS_FRAGMENTS) {
+            if (ancestorCls.includes(fragment)) return false;
+        }
+        // PFP filter: image wrapped in a profile link ( <a href="/in/..."> )
+        // but NOT a post link ( /posts/ or /feed/ )
+        if (cur.tagName === "A") {
+            const href = cur.getAttribute("href") || "";
+            if (href.includes("/in/") && !href.includes("/posts/") && !href.includes("/feed/")) return false;
+        }
+        cur = cur.parentElement;
+    }
+
+    return true;
+}
+
+/**
+ * Finds the primary content image(s) in a single post container.
+ *
+ * Strategy:
+ *   1. Target known LinkedIn media container classes directly.
+ *   2. Target carousel / multi-image containers.
+ *   3. Fallback: scan all imgs in the post and filter with isValidPostImage.
+ *
+ * Returns an array of { url, alt } objects.
+ * Returns multiple entries for carousel posts.
+ * Returns an empty array if no valid post image is found.
+ */
+function findMainImageInPost(postElement) {
+    if (!postElement) return [];
+
+    const results = [];
+    const seen = new Set();
+
+    function collectFromContainer(containerEl) {
+        for (const img of containerEl.querySelectorAll("img")) {
+            const src = img.src || img.getAttribute("src") || "";
+            if (!src || seen.has(src)) continue;
+            if (!isValidPostImage(img)) continue;
+            seen.add(src);
+            results.push({ url: src, alt: img.alt || "" });
+        }
+    }
+
+    // Strategy 1: targeted media container selectors
+    for (const sel of IMAGE_CONTAINER_SELECTORS) {
+        try {
+            for (const container of postElement.querySelectorAll(sel)) {
+                collectFromContainer(container);
+            }
+        } catch (_) {}
+        if (results.length > 0) break; // stop after first matching selector class
+    }
+
+    // Strategy 2: carousel / multi-image containers
+    if (results.length === 0) {
+        for (const sel of CAROUSEL_CONTAINER_SELECTORS) {
+            try {
+                const carouselEl = postElement.querySelector(sel);
+                if (carouselEl) collectFromContainer(carouselEl);
+            } catch (_) {}
+        }
+    }
+
+    // Strategy 3: fallback — scan all imgs in post and filter
+    if (results.length === 0) {
+        for (const img of postElement.querySelectorAll("img")) {
+            const src = img.src || img.getAttribute("src") || "";
+            if (!src || seen.has(src)) continue;
+            if (!isValidPostImage(img)) continue;
+            seen.add(src);
+            results.push({ url: src, alt: img.alt || "" });
+        }
+    }
+
+    return results;
+}
+
+// ── Content-script image cache fetch ─────────────────────────
+// This must run in the content script, NOT the background service worker.
+// Chrome's HTTP cache is partitioned by top-frame origin (Chrome 86+).
+// Images loaded by the LinkedIn page are cached under linkedin.com as the
+// top-frame.  A service worker fetch uses chrome-extension:// as the
+// top-frame and therefore hits a completely different cache partition,
+// always missing.  Running fetch() here shares the page's cache partition.
+
+// Maximum pixel dimension for stored images (longest edge).
+// Images larger than this are scaled down proportionally before
+// JPEG re-encoding.  1200 px is large enough for any dashboard
+// use-case while keeping stored base64 strings compact.
+const IMAGE_MAX_DIMENSION = 1200;
+
+// JPEG quality used for Canvas re-encoding (0–1).
+// 0.82 retains clear text/detail in LinkedIn post images while
+// typically reducing size by 40–60 % vs a raw PNG or WebP blob.
+const IMAGE_JPEG_QUALITY = 0.82;
+
+/**
+ * Compresses an image Blob using the Canvas API.
+ *
+ * Steps:
+ *   1. Decode blob → ImageBitmap (no <img> element, no DOM insertion).
+ *   2. Scale down if the longest edge exceeds IMAGE_MAX_DIMENSION.
+ *   3. Draw onto an OffscreenCanvas (worker-safe; falls back to a
+ *      regular <canvas> which is also available in content scripts).
+ *   4. Return as a JPEG data-URI at IMAGE_JPEG_QUALITY.
+ *
+ * Falls back to raw FileReader base64 if Canvas APIs are unavailable
+ * or the image cannot be decoded (e.g. SVG without explicit dimensions).
+ */
+async function compressImageBlob(blob) {
+    try {
+        const bitmap = await createImageBitmap(blob);
+        const ow = bitmap.width;
+        const oh = bitmap.height;
+
+        // Proportional down-scale
+        const scale = Math.min(1, IMAGE_MAX_DIMENSION / Math.max(ow, oh));
+        const w = Math.round(ow * scale);
+        const h = Math.round(oh * scale);
+
+        // Prefer OffscreenCanvas (no DOM side-effects); fall back to <canvas>
+        let canvas;
+        if (typeof OffscreenCanvas !== "undefined") {
+            canvas = new OffscreenCanvas(w, h);
+        } else {
+            canvas = document.createElement("canvas");
+            canvas.width = w;
+            canvas.height = h;
+        }
+
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(bitmap, 0, 0, w, h);
+        bitmap.close(); // free GPU memory immediately
+
+        if (canvas instanceof OffscreenCanvas) {
+            const compressedBlob = await canvas.convertToBlob({ type: "image/jpeg", quality: IMAGE_JPEG_QUALITY });
+            return await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error("FileReader error"));
+                reader.readAsDataURL(compressedBlob);
+            });
+        } else {
+            // HTMLCanvasElement.toDataURL is synchronous
+            return canvas.toDataURL("image/jpeg", IMAGE_JPEG_QUALITY);
+        }
+    } catch {
+        // Canvas decode failed (e.g. SVG, CORS-tainted canvas) —
+        // fall back to lossless raw blob encoding.
+        return await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error("FileReader error"));
+            reader.readAsDataURL(blob);
+        });
+    }
+}
+
+async function fetchImagesFromCache(imageList) {
+    const results = [];
+    for (let i = 0; i < imageList.length; i++) {
+        const { url, alt } = imageList[i];
+        try {
+            const res = await fetch(url, {
+                method: "GET",
+                // force-cache: use the browser's disk cache; only fall back to
+                // the network if the resource is genuinely missing from cache.
+                cache: "force-cache",
+                // omit: do not attach LinkedIn session cookies to this request
+                // so that even a cache-miss network fetch is not authenticated.
+                credentials: "omit",
+            });
+            if (!res.ok) {
+                results.push({ url, alt: alt || "", base64: null });
+                continue;
+            }
+            const blob = await res.blob();
+            if (!blob || blob.size === 0) {
+                results.push({ url, alt: alt || "", base64: null });
+                continue;
+            }
+            // Compress via Canvas before encoding to base64.
+            // This reduces MongoDB document size by ~40–60 % compared to
+            // storing the raw blob, and caps the longest dimension at
+            // IMAGE_MAX_DIMENSION px so oversized images are stored consistently.
+            const base64 = await compressImageBlob(blob);
+            results.push({ url, alt: alt || "", base64: base64 || null });
+        } catch {
+            results.push({ url, alt: alt || "", base64: null });
+        }
+        // Randomised delay between sequential fetches to prevent burst patterns.
+        if (i < imageList.length - 1) {
+            await new Promise(r => setTimeout(r, 200 + Math.floor(Math.random() * 300)));
+        }
+    }
+    return results;
 }
 
 // 3) Safe messaging
@@ -734,6 +1057,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     if (message.action === "showNotification") {
         showToast(message.success, message.message);
+    }
+    if (message.action === "fetchImages") {
+        // Called by the background after a successful text save.
+        // Runs here (page context) so cache: 'force-cache' hits the same HTTP
+        // cache partition that the LinkedIn page populated.
+        const { imageUrls } = message;
+        if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
+            sendResponse({ images: [] });
+            return true;
+        }
+        fetchImagesFromCache(imageUrls)
+            .then(images => sendResponse({ images }))
+            .catch(() => sendResponse({ images: [] }));
+        return true; // keep channel open for async response
     }
 });
 

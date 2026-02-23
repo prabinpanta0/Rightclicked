@@ -6,8 +6,11 @@
     "permissions": ["activeTab", "contextMenus", "storage"],
     "host_permissions": [
         "https://www.linkedin.com/*",
+        "https://*.licdn.com/*",
         "https://rightclicked-backend.vercel.app/*",
-        "https://rightclicked.vercel.app/*"
+        "https://rightclicked.vercel.app/*",
+        "http://localhost:3001/*",
+        "http://localhost:5173/*"
     ],
     "author": "prabinpanta0",
     "background": {

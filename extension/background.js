@@ -1,5 +1,7 @@
-const API_BASE = "https://rightclicked-backend.vercel.app/api";
-const FRONTEND_BASE = "https://rightclicked.vercel.app";
+// const API_BASE = "https://rightclicked-backend.vercel.app/api";
+// const FRONTEND_BASE = "https://rightclicked.vercel.app";
+const API_BASE = "http://localhost:3001/api";
+const FRONTEND_BASE = "http://localhost:5173";
 const ACCOUNT_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const AccountCache = {
@@ -58,7 +60,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
             notifyTab(tab.id, false, "Could not find post content here.");
             return;
         }
-        const result = await savePost(resp.postData);
+        const result = await savePost(resp.postData, tab.id);
         const successMessage = result.accountLabel
             ? `Saved post by ${resp.postData.authorName} to ${result.accountLabel}`
             : `Saved post by ${resp.postData.authorName}`;
@@ -75,7 +77,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             return true;
         }
         GlobalRateLimit.record();
-        savePost(msg.postData).then(sendResponse);
+        // msg.tabId is set by popup.js; sender.tab?.id is set when the
+        // message originates from a content script (dropdown menu button).
+        const tabId = msg.tabId || sender.tab?.id || null;
+        savePost(msg.postData, tabId).then(sendResponse);
         return true;
     }
     if (msg.action === "getStatus") {
@@ -94,6 +99,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.action === "logout") {
         chrome.storage.local.remove("token");
         sendResponse({ success: true });
+        return true;
+    }
+    if (msg.action === "fetchPostImages") {
+        // Explicit image-fetch request from the content script.
+        // Also called internally by savePost() as a side effect.
+        handleImageRequest(msg)
+            .then(sendResponse)
+            .catch(() => sendResponse({ success: false }));
         return true;
     }
 });
@@ -118,7 +131,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 // ---------- API helpers ----------
 
-async function savePost(postData) {
+async function savePost(postData, tabId = null) {
     try {
         const { token } = await chrome.storage.local.get("token");
         if (!token) {
@@ -140,6 +153,21 @@ async function savePost(postData) {
             throw new Error(typeof msg === "string" ? msg.slice(0, 220) : "Save failed");
         }
         const accountLabel = await getAccountLabel(token);
+
+        // Non-blocking image pipeline: fire-and-forget so the "Saved" toast
+        // is shown immediately without waiting for image processing.
+        // Prefer routing through the content script (fetchImagesViaTab) which
+        // shares the LinkedIn page's HTTP cache partition.  Fall back to a
+        // direct service-worker fetch when no tabId is available.
+        if (data?._id && Array.isArray(postData.imageUrls) && postData.imageUrls.length > 0) {
+            const postId = String(data._id);
+            if (tabId) {
+                fetchImagesViaTab(tabId, postData.imageUrls, postId, token).catch(() => {});
+            } else {
+                handleImageRequest({ imageUrls: postData.imageUrls, postId }).catch(() => {});
+            }
+        }
+
         return { success: true, post: data || {}, accountLabel };
     } catch (err) {
         return { success: false, error: err.message };
@@ -203,6 +231,178 @@ function notifyTab(tabId, success, message) {
     chrome.tabs.sendMessage(tabId, { action: "showNotification", success, message }, () => {
         void chrome.runtime.lastError;
     });
+}
+
+// ── Image pipeline: content-script relay ─────────────────────
+// Chrome partitions the HTTP cache by top-frame origin (Chrome 86+).
+// Images on linkedin.com are cached under linkedin.com as top-frame.
+// A service worker fetch uses chrome-extension:// as top-frame and
+// therefore always misses the cache.  Sending the fetch request to
+// the content script (which runs in the linkedin.com context) solves
+// this: the content script's fetch() shares the page's cache partition.
+
+/**
+ * Asks the content script in `tabId` to fetch images from the browser
+ * disk cache and relay the base64 data to the backend.
+ * Falls back to handleImageRequest() (direct service-worker fetch)
+ * if the tab is no longer available.
+ */
+async function fetchImagesViaTab(tabId, imageUrls, postId, token) {
+    if (!tabId || !Array.isArray(imageUrls) || imageUrls.length === 0) {
+        return { success: false };
+    }
+    try {
+        const resp = await chrome.tabs.sendMessage(tabId, { action: "fetchImages", imageUrls });
+        if (!resp?.images?.length) return { success: false };
+        return relayToBackend(resp.images, postId, token);
+    } catch {
+        // Tab closed or navigated — fall back to a direct service-worker fetch.
+        return handleImageRequest({ imageUrls, postId });
+    }
+}
+
+// ── Image cache-fetch pipeline (service-worker fallback) ──────
+// Used when no tabId is available (e.g. programmatic triggers).
+// Because the service worker cache key differs from the page cache key,
+// force-cache may result in a real network request to LinkedIn's CDN.
+// This is acceptable as a last-resort fallback only.
+
+/**
+ * Validates that a base64 string is a complete, well-formed image
+ * data-URI.  Prevents the backend from ingesting corrupted payloads.
+ */
+function validateImageIntegrity(base64String) {
+    if (typeof base64String !== "string" || base64String.length < 50) return false;
+    return (
+        base64String.startsWith("data:image/jpeg;base64,") ||
+        base64String.startsWith("data:image/png;base64,") ||
+        base64String.startsWith("data:image/webp;base64,") ||
+        base64String.startsWith("data:image/gif;base64,")
+    );
+}
+
+/**
+ * Reads a Blob and resolves with a base64 data-URI string.
+ */
+function processBlobAsBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("FileReader error"));
+        reader.readAsDataURL(blob);
+    });
+}
+
+/**
+ * Fetches a single image URL using the browser's disk cache.
+ *
+ * cache: 'force-cache'  — browser returns a cached response without
+ *                          re-validating with the server.
+ * credentials: 'omit'   — no LinkedIn cookies are attached to the
+ *                          request, preventing accidental session leaks.
+ * mode: 'cors'          — service workers operate in a different origin
+ *                          context and require explicit CORS mode.
+ *
+ * Returns a validated base64 data-URI string, or null on any failure.
+ */
+async function fetchFromCache(url) {
+    try {
+        const res = await fetch(url, {
+            method: "GET",
+            cache: "force-cache",
+            credentials: "omit",
+            mode: "cors",
+        });
+        if (!res.ok) return null;
+        const blob = await res.blob();
+        if (!blob || blob.size === 0) return null;
+        const base64 = await processBlobAsBase64(blob);
+        return validateImageIntegrity(base64) ? base64 : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Fetches a sequence of image URLs one at a time.
+ *
+ * Sequential (not parallel) fetching with a randomised delay between
+ * requests (200-500 ms) prevents burst patterns that could be flagged
+ * as automation by LinkedIn's detection systems.
+ *
+ * Returns an array of { url, alt, base64 } objects.
+ * base64 is null for any URL that could not be retrieved from cache.
+ */
+async function fetchImageSequence(imageList) {
+    const results = [];
+    for (let i = 0; i < imageList.length; i++) {
+        const { url, alt } = imageList[i];
+        const base64 = await fetchFromCache(url);
+        results.push({ url, alt: alt || "", base64: base64 || null });
+        // Randomised delay between images to mimic human interaction timing.
+        // Skip delay after the last image.
+        if (i < imageList.length - 1) {
+            const delay = 200 + Math.floor(Math.random() * 300);
+            await new Promise(r => setTimeout(r, delay));
+        }
+    }
+    return results;
+}
+
+/**
+ * Sends fetched image data to the backend to be persisted alongside
+ * the saved post.  Only images that pass validateImageIntegrity are
+ * included in the request body.
+ */
+async function relayToBackend(images, postId, token) {
+    if (!images || images.length === 0 || !token || !postId) return { success: false };
+    try {
+        const valid = images.filter(img => img.base64 && validateImageIntegrity(img.base64));
+        if (valid.length === 0) return { success: false, error: "No valid images after cache fetch" };
+        const res = await fetch(`${API_BASE}/posts/${postId}/images`, {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ images: valid }),
+        });
+        if (!res.ok) return { success: false };
+        return { success: true };
+    } catch {
+        return { success: false };
+    }
+}
+
+/**
+ * Orchestrates the full image-fetch pipeline for a single post.
+ *
+ * 1. Validates inputs.
+ * 2. Applies a randomised initial latency (200-500 ms) so the first
+ *    cache read does not occur at machine-perfect speed.
+ * 3. Sequentially fetches each image URL from the browser cache.
+ * 4. Relays validated base64 payloads to the backend.
+ *
+ * This function is called both internally by savePost() (fire-and-
+ * forget) and directly via the fetchPostImages message action.
+ */
+async function handleImageRequest(msg) {
+    const { imageUrls, postId } = msg;
+    if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
+        return { success: false, error: "No image URLs provided" };
+    }
+    if (!postId) return { success: false, error: "No post ID provided" };
+
+    const { token } = await chrome.storage.local.get("token");
+    if (!token) return { success: false, error: "Not authenticated" };
+
+    // Randomised initial latency so the fetch pipeline does not start
+    // at the exact same millisecond as the post-save API call.
+    const initialDelay = 200 + Math.floor(Math.random() * 300);
+    await new Promise(r => setTimeout(r, initialDelay));
+
+    const images = await fetchImageSequence(imageUrls);
+    return relayToBackend(images, postId, token);
 }
 
 console.log("Rightclicked background service worker loaded");

@@ -20,6 +20,7 @@ const recentTabContent = document.getElementById("recent-tab-content");
 const recentList = document.getElementById("recent-list");
 
 let extractedPostData = null;
+let activeTabId = null;
 
 // ---------- Auth ----------
 
@@ -87,6 +88,7 @@ async function extractCurrentPost() {
             showPreviewEmpty("Not on LinkedIn. Navigate to LinkedIn to save posts.");
             return;
         }
+        activeTabId = tab.id;
 
         // Ask the content script to extract the post (single source of truth)
         chrome.tabs.sendMessage(tab.id, { action: "extractPost", source: "popup" }, resp => {
@@ -127,7 +129,11 @@ saveFromPopup.addEventListener("click", async () => {
     const startTime = Date.now();
     popupTrackEvent("save_attempt");
 
-    const result = await chrome.runtime.sendMessage({ action: "savePost", postData: extractedPostData });
+    const result = await chrome.runtime.sendMessage({
+        action: "savePost",
+        postData: extractedPostData,
+        tabId: activeTabId,
+    });
     const timeMs = Date.now() - startTime;
     if (result.success) {
         popupTrackEvent("save_success", { timeMs });

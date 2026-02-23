@@ -632,4 +632,48 @@ router.post("/analyze-batch", aiLimiter, async (req, res) => {
     }
 });
 
+// Attach base64 images fetched from the browser cache to a saved post.
+// Called by the background service worker after the initial text save.
+router.patch("/:id/images", async (req, res) => {
+    try {
+        const { images } = req.body;
+        if (!Array.isArray(images) || images.length === 0) {
+            return res.status(400).json({ error: "images array required" });
+        }
+
+        // Only persist images with a validated base64 payload so that
+        // corrupted or partial entries never reach the database.
+        const validImages = images
+            .filter(img => {
+                const b = img.base64 || "";
+                return (
+                    b.startsWith("data:image/jpeg;base64,") ||
+                    b.startsWith("data:image/png;base64,") ||
+                    b.startsWith("data:image/webp;base64,") ||
+                    b.startsWith("data:image/gif;base64,")
+                );
+            })
+            .map(img => ({
+                url: String(img.url || "").slice(0, 2000),
+                base64: img.base64,
+                alt: String(img.alt || "").slice(0, 500),
+                mimeType: img.base64.split(";")[0].replace("data:", ""),
+            }));
+
+        if (validImages.length === 0) {
+            return res.status(422).json({ error: "No valid images after integrity check" });
+        }
+
+        const post = await Post.findOneAndUpdate(
+            { _id: req.params.id, userId: req.userId },
+            { $set: { images: validImages } },
+            { new: true },
+        );
+        if (!post) return res.status(404).json({ error: "Post not found" });
+        return res.json({ success: true, imageCount: validImages.length });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to save images" });
+    }
+});
+
 module.exports = router;
